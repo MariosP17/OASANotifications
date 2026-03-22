@@ -187,7 +187,7 @@ def getStopNameFromCode(stop_codes,stops_names):
     return stops_names
 
 
-def is_remote_today():
+def is_remote_or_holiday_today():
     """Return True if user's primary Google Calendar has an event with 'Remote' in the summary for today.
 
     This function uses `credentials.json` (OAuth client) and stores/uses `token.json` for cached credentials.
@@ -231,6 +231,16 @@ def is_remote_today():
             if 'remote' in summary.lower():
                 print("Found 'Remote' event in calendar today.")
                 return True
+        holidays_result = service.events().list(
+            calendarId=os.getenv('HOLIDAYS_CALENDAR_ID'), timeMin=start, timeMax=end,
+            singleEvents=True, orderBy='startTime'
+        ).execute()
+        holidays = holidays_result.get('items', [])
+        for holiday in holidays:
+            description = holiday.get('description', '')
+            if 'Επίσημη αργία'.lower() in description.lower():
+                print("Found Greek official holiday in calendar today.")
+                return True
         return False
     except Exception as exc:
         print(f"Error querying Google Calendar: {exc}")
@@ -241,8 +251,8 @@ def getCurrentStopCodes():
     print(f"Current time: {now}. Checking for bus arrivals...")
     # If the user's calendar indicates a remote day, skip notifications
     try:
-        if is_remote_today():
-            print("Remote day detected in calendar — skipping notifications for today.")
+        if is_remote_or_holiday_today():
+            print("Remote day or Greek official holiday detected in calendar — skipping notifications for today.")
             return []
     except Exception as exc:
         print(f"Calendar check failed: {exc}")
