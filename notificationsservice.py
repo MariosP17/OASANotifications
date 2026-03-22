@@ -256,6 +256,7 @@ def getCurrentStopCodes():
             return []
     except Exception as exc:
         print(f"Calendar check failed: {exc}")
+        return []
     if datetime.strptime("14:40", "%H:%M").time() <= now <= datetime.strptime("15:30", "%H:%M").time():
         return ["320013", "320009"]
     elif datetime.strptime("06:50", "%H:%M").time() < now <= datetime.strptime("7:25", "%H:%M").time():
