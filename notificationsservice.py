@@ -99,8 +99,17 @@ def checkSendNotification(bus: BusData, current_bus_data_list: dict, second_arri
     if routes_muted.get(bus.route_number, {}).get(bus.vehicle_number, False):
         print(f"Vehicle {bus.vehicle_number} on route {bus.route_number} is muted. Skipping notification.")
         return False
-    if current_bus_data_list[stop_code].arrival_time != "-1" and (0 <= (int(current_bus_data_list[stop_code].arrival_time) - int(bus.arrival_time)) < 5 and int(bus.arrival_time) > 4):
-        print(f"Arrival time hasn't changed significantly ({current_bus_data_list[stop_code].arrival_time} -> {bus.arrival_time}). Skipping notification for route {bus.route_number}.")
+    old_time = int(current_bus_data_list[stop_code].arrival_time)
+    new_time = int(bus.arrival_time)
+
+    #Skip if arrival time hasn't changed at all
+    if new_time == old_time:
+        print(f"No change in arrival time ({old_time}). Skipping notification for route {bus.route_number}.")
+        return False
+
+    #Skip if change is small (<5 min) and remaining time is above 5 minutes
+    if current_bus_data_list[stop_code].arrival_time != "-1" and 0 < (old_time - new_time) < 5 and new_time > 4:
+        print(f"Arrival time hasn't changed significantly ({old_time} -> {new_time}). Skipping notification for route {bus.route_number}.")
         return False
     if (len(arrivals) > 1 and bus.route_number == arrivals[1]["route_code"] and int(bus.arrival_time) <= 4):
         print(f"First bus is too close. Adding second bus notification data.")
@@ -246,24 +255,32 @@ def is_remote_or_holiday_today():
         print(f"Error querying Google Calendar: {exc}")
         return False
 
-def getCurrentStopCodes():
+def getCurrentStopCodesWithNames(stop_codes,stop_names):
     now = datetime.now().time()
     print(f"Current time: {now}. Checking for bus arrivals...")
     # If the user's calendar indicates a remote day, skip notifications
     try:
         if is_remote_or_holiday_today():
             print("Remote day or Greek official holiday detected in calendar — skipping notifications for today.")
-            return []
+            return [],[]
     except Exception as exc:
         print(f"Calendar check failed: {exc}")
-        return []
+        return [],[]
     if datetime.strptime("14:40", "%H:%M").time() <= now <= datetime.strptime("15:30", "%H:%M").time():
-        return ["320013", "320009"]
+        if stop_codes == ["320013", "320009"]:
+            print("Stop codes haven't changed since last check. Skipping API call.")
+            return stop_codes, stop_names
+        stop_names = getStopNameFromCode(["320013", "320009"], stop_names)
+        return ["320013", "320009"], stop_names
     elif datetime.strptime("06:50", "%H:%M").time() < now <= datetime.strptime("7:25", "%H:%M").time():
-        return ["320005","240071"]
+        if stop_codes == ["320005","240071"]:
+            print("Stop codes haven't changed since last check. Skipping API call.")
+            return stop_codes, stop_names
+        stop_names = getStopNameFromCode(["320005","240071"], stop_names)
+        return ["320005","240071"], stop_names
     else:
         print("Outside of specified time windows. No notifications will be sent.")
-        return []  # Return an empty list if it's outside the specified time windows
+        return [],[]  # Return an empty list if it's outside the specified time windows
 
 def buildarrivals(stop_code):
     arrivals = requests.get(f"https://telematics.oasa.gr/api/?act=getStopArrivals&p1={stop_code}").json()
@@ -281,6 +298,7 @@ if __name__ == "__main__":
             "2034" : "218",
             "2899" : "218"
         }
+        stop_codes = []
         stops_names = {}
         route_names = {}
         routes_muted = {}
@@ -296,12 +314,11 @@ if __name__ == "__main__":
             if mute_until and datetime.now() >= mute_until:
                 print("Temporary mute expired. Resuming notifications.")
                 mute_until = None
-            stop_codes = getCurrentStopCodes()
+            stop_codes,stops_names = getCurrentStopCodesWithNames(stop_codes,stops_names)
             if stop_codes == []:
                 break 
             bus_data_list = createBusDataList(stop_codes,bus_data_list)
             second_arrival_data = createsecondBusList(stop_codes)
-            stops_names = getStopNameFromCode(stop_codes,stops_names)
             for stop_code in stop_codes:
                 arrivals = buildarrivals(stop_code)
                 bus = createBus(stop_code,route_names)
