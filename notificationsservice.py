@@ -232,21 +232,22 @@ def is_remote_or_holiday_today():
 
         events_result = service.events().list(
             calendarId=os.getenv('WORK_CALENDAR_ID'), timeMin=start, timeMax=end,
-            singleEvents=True, orderBy='startTime', q='Remote'
+            singleEvents=True, orderBy='startTime'
         ).execute()
-        items = events_result.get('items', [])
-        for ev in items:
-            summary = ev.get('summary', '')
-            if 'remote' in summary.lower():
-                print("Found 'Remote' event in calendar today.")
-                return True
         holidays_result = service.events().list(
             calendarId=os.getenv('HOLIDAYS_CALENDAR_ID'), timeMin=start, timeMax=end,
             singleEvents=True, orderBy='startTime'
         ).execute()
-        holidays = holidays_result.get('items', [])
-        for holiday in holidays:
-            description = holiday.get('description', '')
+        items = events_result.get('items', []) + holidays_result.get('items', [])
+        for ev in items:
+            summary = ev.get('summary', '')
+            description = ev.get('description', '')
+            if 'remote' in summary.lower():
+                print("Found 'Remote' event in calendar today.")
+                return True
+            if 'άδεια'.lower() in summary.lower() or 'αδεια'.lower() in summary.lower():
+                print("Found Greek leave event in calendar today.")
+                return True
             if 'Επίσημη αργία'.lower() in description.lower():
                 print("Found Greek official holiday in calendar today.")
                 return True
@@ -261,7 +262,7 @@ def getCurrentStopCodesWithNames(stop_codes,stop_names):
     # If the user's calendar indicates a remote day, skip notifications
     try:
         if is_remote_or_holiday_today():
-            print("Remote day or Greek official holiday detected in calendar — skipping notifications for today.")
+            print("Remote day, leave or Greek official holiday detected in calendar — skipping notifications for today.")
             return [],[]
     except Exception as exc:
         print(f"Calendar check failed: {exc}")
