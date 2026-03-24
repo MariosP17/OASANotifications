@@ -20,7 +20,7 @@ TOPIC = os.getenv("TOPIC_NAME")
 WORK_CALENDAR_ID = os.getenv("WORK_CALENDAR_ID")
 HOLIDAYS_CALENDAR_ID = os.getenv("HOLIDAYS_CALENDAR_ID")
 USERS_SETTINGS = os.getenv("usersettings_file_path")
-TIMEOUT = 20
+TIMEOUT = (5, 15)  # (connect timeout, read timeout) in seconds
 
 # Google Calendar read-only scope
 SCOPES = [os.getenv("GOOGLE_CALENDAR_SCOPE")]
