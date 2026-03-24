@@ -300,7 +300,6 @@ def getCurrentStopCodesWithNames(user_settings_times_list, stop_codes, stop_name
             return [],[]
     except Exception as exc:
         print(f"Calendar check failed: {exc}")
-        return [],[]
     if any(times.is_in_time_window(now) for times in user_settings_times_list):
         times = [t for t in user_settings_times_list if t.is_in_time_window(now)][0]  # Get the first matching settings
         if set(times.stop_codes) == set(stop_codes):
