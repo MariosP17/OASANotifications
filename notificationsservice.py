@@ -19,6 +19,7 @@ load_dotenv()
 TOPIC = os.getenv("TOPIC_NAME")
 WORK_CALENDAR_ID = os.getenv("WORK_CALENDAR_ID")
 HOLIDAYS_CALENDAR_ID = os.getenv("HOLIDAYS_CALENDAR_ID")
+USERS_SETTINGS = os.getenv("usersettings_file_path")
 TIMEOUT = 20
 
 # Google Calendar read-only scope
@@ -29,7 +30,7 @@ mute_until = None
 listener_stop_event = threading.Event()
 
 class BusData:
-    def __init__(self, bus_number="XXX", bus_name="Bus Name", route_number="YYY", vehicle_number="ZZZ", arrival_time="-1"):
+    def __init__(self, bus_number="XXX", bus_name= None, route_number="YYY", vehicle_number="ZZZ", arrival_time="-1"):
         self.bus_number = bus_number
         self.bus_name = bus_name
         self.route_number = route_number
@@ -39,11 +40,39 @@ class BusData:
     def is_default(self):
             return (
                 self.bus_number == "XXX" and
-                self.bus_name == "Bus Name" and
+                self.bus_name == None and
                 self.route_number == "YYY" and
                 self.vehicle_number == "ZZZ" and
                 self.arrival_time == "-1"
             )
+
+class UserSettings:
+    def __init__(self, user_settings_times_list_dict= {}, tracked_routes_codes = {}):
+        self.user_settings_times_list = UserSettingsTime.createUserSettingsTimeList(user_settings_times_list_dict)
+        self.tracked_routes_codes = tracked_routes_codes
+
+class UserSettingsTime:
+    def __init__(self, start = "00:00", end = "23:59", stop_codes = []):
+        self.start = start
+        self.end = end
+        self.stop_codes = stop_codes
+
+    def is_in_time_window(self, now):
+        start_time = datetime.strptime(self.start, "%H:%M").time()
+        end_time = datetime.strptime(self.end, "%H:%M").time()
+        return start_time <= now <= end_time
+    
+    @staticmethod
+    def createUserSettingsTimeList(user_settings_list_dict):
+        user_settings_list = []
+        for item in user_settings_list_dict:
+            user_settings = UserSettingsTime(
+                stop_codes=item.get("codes", []),
+                start=item.get("start_time", "00:00"),
+                end=item.get("end_time", "23:59")
+            )
+            user_settings_list.append(user_settings)
+        return user_settings_list
 
 def createBusDataList(stop_codes,current_list):
     for stop_code in stop_codes:
@@ -57,42 +86,33 @@ def createsecondBusList(stop_codes):
         list[stop_code] = None
     return list
 
-def createBus(stop_code,route_names):
+def createBus(route_names,arrivals):
     bus_data = BusData()
-    try:
-        response = requests.get(f"https://telematics.oasa.gr/api/?act=getStopArrivals&p1={stop_code}",timeout=TIMEOUT)
-    except requests.RequestException as e:
-        print(f"Error fetching bus data for stop {stop_code}: {e}")
+    if (len(arrivals)) == 0:
         return bus_data
+    bus = arrivals[0]
+    if bus["route_code"] in tracked_routes_codes:
+        bus_data.bus_number = tracked_routes_codes[bus["route_code"]]
+        bus_data.route_number = bus["route_code"]
+        bus_data.arrival_time = bus["btime2"]
+        bus_data.vehicle_number = bus["veh_code"]
+        if route_names.get(bus["route_code"]) is not None:
+            bus_data.bus_name = route_names[bus["route_code"]]
+        else:
+            try:
+                print(f"Fetching route name for route {bus['route_code']}...")
+                response2 = requests.get(f"https://telematics.oasa.gr/api/?act=getRouteName&p1={bus['route_code']}",timeout=TIMEOUT)
+                if response2.status_code == 200:
+                    data = response2.json()
+                    bus_data.bus_name = data[0].get("route_descr", None)
+                    route_names[bus["route_code"]] = bus_data.bus_name
+                else:
+                    bus_data.bus_name = None
+                    route_names[bus["route_code"]] = bus_data.bus_name
+            except requests.RequestException as e:
+                print(f"Error fetching route name for route {bus['route_code']}: {e}")
 
-    if response.status_code == 200:
-        data = response.json()
-        arrivals = data if isinstance(data, list) else []
-        arrivals = [x for x in arrivals if x.get("route_code") in tracked_routes_codes]
-        if (len(arrivals)) == 0:
-            return bus_data
-        bus = arrivals[0]
-        if bus["route_code"] in tracked_routes_codes:
-            bus_data.bus_number = tracked_routes_codes[bus["route_code"]]
-            bus_data.route_number = bus["route_code"]
-            bus_data.arrival_time = bus["btime2"]
-            bus_data.vehicle_number = bus["veh_code"]
-            if route_names.get(bus["route_code"]) is not None:
-                bus_data.bus_name = route_names[bus["route_code"]]
-            else:
-                try:
-                    response2 = requests.get(f"https://telematics.oasa.gr/api/?act=getRouteName&p1={bus['route_code']}",timeout=TIMEOUT)
-                    if response2.status_code == 200:
-                        data = response2.json()
-                        bus_data.bus_name = data[0].get("route_descr", "Unknown Route")
-                        route_names[bus["route_code"]] = bus_data.bus_name
-                    else:
-                        bus_data.bus_name = "Unknown Route"
-                        route_names[bus["route_code"]] = bus_data.bus_name
-                except requests.RequestException as e:
-                    print(f"Error fetching route name for route {bus['route_code']}: {e}")
-
-        return bus_data 
+    return bus_data 
 
 def buildMuteList(bus: BusData):
     if routes_muted.get(bus.route_number, {}).get(bus.vehicle_number) == None:
@@ -130,7 +150,7 @@ def checkSendNotification(bus: BusData, current_bus_data_list: dict, second_arri
 def sendNotification(current_bus_data_list: dict, stop_code: str):
     try:
         requests.post(f"https://ntfy.sh/{TOPIC}",
-                        data= f"{f'Arriving in **{current_bus_data_list[stop_code].arrival_time}\'** *({current_bus_data_list[stop_code].bus_name})*' if int(current_bus_data_list[stop_code].arrival_time) > 0 else f'Arriving **now** *({current_bus_data_list[stop_code].bus_name})*'}{second_arrival_data[stop_code] if second_arrival_data[stop_code] else ''}".encode('utf-8'),
+                        data= f"{f'Arriving in **{current_bus_data_list[stop_code].arrival_time}\'** *({current_bus_data_list[stop_code].bus_name if current_bus_data_list[stop_code].bus_name else 'Unknown Route'})*' if int(current_bus_data_list[stop_code].arrival_time) > 0 else f'Arriving **now** *({current_bus_data_list[stop_code].bus_name if current_bus_data_list[stop_code].bus_name else 'Unknown Route'})*'}{second_arrival_data[stop_code] if second_arrival_data[stop_code] else ''}".encode('utf-8'),
                         headers={
                             "Title": f"{current_bus_data_list[stop_code].bus_number} - {stops_names.get(stop_code, 'Unknown Stop')}".encode('utf-8'),
                             "Priority": "high",
@@ -147,7 +167,7 @@ def listen_for_mute(stop_event):
     """Background thread that listens for the 'mute' command on the topic."""
     global is_muted
     global mute_until
-    print(f"Listening for mute commands on: {TOPIC}")
+    print(f"Listening for mute commands on: {TOPIC}\n")
 
     subscribe_url = f"https://ntfy.sh/{TOPIC}/json"
 
@@ -270,7 +290,7 @@ def is_remote_or_holiday_today():
         print(f"Error querying Google Calendar: {exc}")
         return False
 
-def getCurrentStopCodesWithNames(stop_codes,stop_names):
+def getCurrentStopCodesWithNames(user_settings_times_list, stop_codes, stop_names):
     now = datetime.now().time()
     print(f"Current time: {now}. Checking for bus arrivals...")
     # If the user's calendar indicates a remote day, skip notifications
@@ -281,32 +301,24 @@ def getCurrentStopCodesWithNames(stop_codes,stop_names):
     except Exception as exc:
         print(f"Calendar check failed: {exc}")
         return [],[]
-    if datetime.strptime("14:40", "%H:%M").time() <= now <= datetime.strptime("15:30", "%H:%M").time():
-        if stop_codes == ["320013", "320009"]:
+    if any(times.is_in_time_window(now) for times in user_settings_times_list):
+        times = [t for t in user_settings_times_list if t.is_in_time_window(now)][0]  # Get the first matching settings
+        if set(times.stop_codes) == set(stop_codes):
             print("Stop codes haven't changed since last check. Skipping API call.")
-            none_codes = [code for code in ["320013", "320009"] if stop_names.get(code) is None]
+            none_codes = [code for code in times.stop_codes if stop_names.get(code) is None]
             if none_codes:
                 for code in none_codes:
                     stop_names[code] = getStopNameFromCode([code], stop_names).get(code, f"Unknown Stop {code}")
             return stop_codes, stop_names
-        stop_names = getStopNameFromCode(["320013", "320009"], stop_names)
-        return ["320013", "320009"], stop_names
-    elif datetime.strptime("06:50", "%H:%M").time() < now <= datetime.strptime("7:25", "%H:%M").time():
-        if stop_codes == ["320005","240071"]:
-            print("Stop codes haven't changed since last check. Skipping API call.")
-            none_codes = [code for code in ["320005","240071"] if stop_names.get(code) is None]
-            if none_codes:
-                for code in none_codes:
-                    stop_names[code] = getStopNameFromCode([code], stop_names).get(code, f"Unknown Stop {code}")
-            return stop_codes, stop_names
-        stop_names = getStopNameFromCode(["320005","240071"], stop_names)
-        return ["320005","240071"], stop_names
+        stop_names = getStopNameFromCode(times.stop_codes, stop_names)
+        return times.stop_codes, stop_names
     else:
         print("Outside of specified time windows. No notifications will be sent.")
         return [],[]  # Return an empty list if it's outside the specified time windows
 
 def buildarrivals(stop_code):
     try:
+        print(f"Fetching arrivals for stop {stop_code}...")
         arrivals = requests.get(f"https://telematics.oasa.gr/api/?act=getStopArrivals&p1={stop_code}", timeout=TIMEOUT).json()
         arrivals = arrivals if isinstance(arrivals, list) else []
         arrivals = [x for x in arrivals if x.get("route_code") in tracked_routes_codes]
@@ -315,22 +327,29 @@ def buildarrivals(stop_code):
         print(f"Error fetching arrivals for stop {stop_code}: {e}")
         return []
 
-
+def buildUserSettings(path):
+    user_settings = UserSettings()
+    try:
+        with open(path, 'r') as f:
+            data = json.load(f)
+            times = data.get("times", [])
+            tracked_routes_codes = data.get("tracked_routes_codes", {})
+            user_settings = UserSettings(user_settings_times_list_dict=times, tracked_routes_codes=tracked_routes_codes)
+    except Exception as exc:
+        print(f"Error loading user settings: {exc}")
+    return user_settings
 listener_thread = threading.Thread(target=listen_for_mute, args=(listener_stop_event,), daemon=True)
 listener_thread.start()
 
 if __name__ == "__main__":
     try:
-        tracked_routes_codes = {
-            "2810" : "218",
-            "2034" : "218",
-            "2899" : "218"
-        }
+        user_settings = buildUserSettings(USERS_SETTINGS)
+        tracked_routes_codes = user_settings.tracked_routes_codes
         stop_codes = []
         stops_names = {}
         route_names = {}
         routes_muted = {}
-        bus_data_list = {}
+        bus_data_list = {}  
         while True:
             if is_muted:
                 print("System is muted. Notification blocked.")
@@ -342,14 +361,14 @@ if __name__ == "__main__":
             if mute_until and datetime.now() >= mute_until:
                 print("Temporary mute expired. Resuming notifications.")
                 mute_until = None
-            stop_codes,stops_names = getCurrentStopCodesWithNames(stop_codes,stops_names)
+            stop_codes,stops_names = getCurrentStopCodesWithNames(user_settings.user_settings_times_list, stop_codes, stops_names)
             if stop_codes == []:
                 break 
             bus_data_list = createBusDataList(stop_codes,bus_data_list)
             second_arrival_data = createsecondBusList(stop_codes)
             for stop_code in stop_codes:
                 arrivals = buildarrivals(stop_code)
-                bus = createBus(stop_code,route_names)
+                bus = createBus(route_names,arrivals)
                 if bus.is_default():
                     print(f"No bus data available for stop {stop_code}. Skipping notification.")
                     continue

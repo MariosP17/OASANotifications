@@ -13,5 +13,6 @@ OASAenv/
 
 # Ignore environment files
 .env
+user_settings.json
 credentials.json
 token.json
