@@ -52,15 +52,24 @@ class UserSettings:
         self.tracked_routes_codes = tracked_routes_codes
 
 class UserSettingsTime:
-    def __init__(self, start = "00:00", end = "23:59", stop_codes = []):
+    def __init__(self, start = "00:00", end = "23:59",timezone = "Europe/Athens", stop_codes = []):
         self.start = start
         self.end = end
+        self.timezone = timezone
         self.stop_codes = stop_codes
 
-    def is_in_time_window(self, now):
-        start_time = datetime.strptime(self.start, "%H:%M").time()
-        end_time = datetime.strptime(self.end, "%H:%M").time()
-        return start_time <= now <= end_time
+    def is_in_time_window(self, now : datetime):
+        start_user_dt = datetime.now(ZoneInfo(self.timezone)).replace(
+            hour=int(self.start.split(":")[0]),
+            minute=int(self.start.split(":")[1])
+        )
+        start_time = start_user_dt.astimezone(now.astimezone().tzinfo).time()
+        end_user_dt = datetime.now(ZoneInfo(self.timezone)).replace(
+            hour=int(self.end.split(":")[0]),
+            minute=int(self.end.split(":")[1])
+        )
+        end_time = end_user_dt.astimezone(now.astimezone().tzinfo).time()
+        return start_time <= now.time() <= end_time
     
     @staticmethod
     def createUserSettingsTimeList(user_settings_list_dict):
@@ -69,6 +78,7 @@ class UserSettingsTime:
             user_settings = UserSettingsTime(
                 stop_codes=item.get("codes", []),
                 start=item.get("start_time", "00:00"),
+                timezone=item.get("timezone","Europe/Athens"),
                 end=item.get("end_time", "23:59")
             )
             user_settings_list.append(user_settings)
@@ -115,6 +125,8 @@ def createBus(route_names,arrivals):
     return bus_data 
 
 def buildMuteList(bus: BusData):
+    if bus.is_default():
+        return
     if routes_muted.get(bus.route_number, {}).get(bus.vehicle_number) == None:
                 print(f"Adding vehicle {bus.vehicle_number} on route {bus.route_number} on tracking list.")
                 inner = routes_muted.setdefault(bus.route_number, {})
@@ -125,41 +137,69 @@ def buildMuteList(bus: BusData):
                 # Add/update the new vehicle as False
                 inner[bus.vehicle_number] = False
 
-def checkSendNotification(bus: BusData, current_bus_data_list: dict, second_arrival_data: dict, arrivals: list, stop_code: str):
-    if routes_muted.get(bus.route_number, {}).get(bus.vehicle_number, False):
-        print(f"Vehicle {bus.vehicle_number} on route {bus.route_number} is muted. Skipping notification.")
-        return False
-    old_time = int(current_bus_data_list[stop_code].arrival_time)
-    new_time = int(bus.arrival_time)
+def checkSendNotification(bus: BusData, current_bus_data_list: dict, second_arrival_data: dict, arrivals: list, stop_code: str,empty_message: bool):
+    if not empty_message:
+        if routes_muted.get(bus.route_number, {}).get(bus.vehicle_number, False):
+            print(f"Vehicle {bus.vehicle_number} on route {bus.route_number} is muted. Skipping notification.")
+            return False
+        old_time = int(current_bus_data_list[stop_code].arrival_time)
+        new_time = int(bus.arrival_time)
 
-    #Skip if arrival time hasn't changed at all
-    if new_time == old_time:
-        print(f"No change in arrival time ({old_time}). Skipping notification for route {bus.route_number}.")
-        return False
+        #Skip if arrival time hasn't changed at all
+        if new_time == old_time:
+            print(f"No change in arrival time ({old_time}). Skipping notification for route {bus.route_number}.")
+            return False
 
-    #Skip if change is small (<5 min) and remaining time is above 5 minutes
-    if current_bus_data_list[stop_code].arrival_time != "-1" and 0 < (old_time - new_time) < 5 and new_time > 4:
-        print(f"Arrival time hasn't changed significantly ({old_time} -> {new_time}). Skipping notification for route {bus.route_number}.")
-        return False
-    if (len(arrivals) > 1 and bus.route_number == arrivals[1]["route_code"] and int(bus.arrival_time) <= 4):
-        print(f"First bus is too close. Adding second bus notification data.")
-        second_arrival_data[stop_code] = f"\nNext in **{arrivals[1]['btime2']}\'**" if int(arrivals[1]['btime2']) > 0 else "\nNext arriving **now**!"
-    current_bus_data_list[stop_code] = bus
+        #Skip if change is small (<5 min) and remaining time is above 5 minutes
+        if current_bus_data_list[stop_code].arrival_time != "-1" and 0 < (old_time - new_time) < 5 and new_time > 4:
+            print(f"Arrival time hasn't changed significantly ({old_time} -> {new_time}). Skipping notification for route {bus.route_number}.")
+            return False
+        if (len(arrivals) > 1 and any(arrival.get("route_code") == bus.route_number and arrival.get("veh_code") != bus.vehicle_number for arrival in arrivals) and int(bus.arrival_time) <= 4):
+            print(f"First bus is too close. Adding second bus notification data.")
+            chosen_arrival = [arrival for arrival in arrivals if arrival.get("route_code") == bus.route_number and arrival.get("veh_code") != bus.vehicle_number][0]
+            second_arrival_data[stop_code] = f"\nNext in **{chosen_arrival['btime2']}\'**" if int(chosen_arrival['btime2']) > 0 else "\nNext arriving **now**!"
+        current_bus_data_list[stop_code] = bus
     return True
 
-def sendNotification(current_bus_data_list: dict, stop_code: str):
+def sendNotification(current_bus_data_list: dict, stop_code: str, sendEmpty :bool,success: bool):
     try:
-        requests.post(f"https://ntfy.sh/{TOPIC}",
-                        data= f"{f'Arriving in **{current_bus_data_list[stop_code].arrival_time}\'** *({current_bus_data_list[stop_code].bus_name if current_bus_data_list[stop_code].bus_name else 'Unknown Route'})*' if int(current_bus_data_list[stop_code].arrival_time) > 0 else f'Arriving **now** *({current_bus_data_list[stop_code].bus_name if current_bus_data_list[stop_code].bus_name else 'Unknown Route'})*'}{second_arrival_data[stop_code] if second_arrival_data[stop_code] else ''}".encode('utf-8'),
-                        headers={
-                            "Title": f"{current_bus_data_list[stop_code].bus_number} - {stops_names.get(stop_code, 'Unknown Stop')}".encode('utf-8'),
-                            "Priority": "high",
-                            "Click": "https://www.oasa.gr/en/telematics/",
-                            "Markdown": "yes",
-                            "Tags": "warning,bus",
-                            "Actions": f"http, Mute, https://ntfy.sh/{TOPIC}, body=Mute 10m, headers.X-Priority=1, clear=true; http, Mute route, https://ntfy.sh/{TOPIC}, body=mute {current_bus_data_list[stop_code].route_number}_{current_bus_data_list[stop_code].vehicle_number}, headers.X-Priority=1, clear=true; http, Stop, https://ntfy.sh/{TOPIC}, body=mute, headers.X-Priority=1, clear=true;".encode('utf-8')
-                        },timeout=TIMEOUT)
-        print(f"Notification sent for route {current_bus_data_list[stop_code].route_number} with vehicle {current_bus_data_list[stop_code].vehicle_number} at stop {stops_names.get(stop_code, 'Unknown Stop')}.")
+        if (sendEmpty):
+            if success:
+                requests.post(f"https://ntfy.sh/{TOPIC}",
+                                data= "No bus is arriving at this stop right now".encode('utf-8'),
+                                headers={
+                                    "Title": f"No Data - {stops_names.get(stop_code, 'Unknown Stop')}".encode('utf-8'),
+                                    "Priority": "high",
+                                    "Click": f"https://telematics.oasa.gr/content.php#stationInfo_{stop_code}",
+                                    "Markdown": "yes",
+                                    "Tags": "warning,bus",
+                                    "Actions": f"http, Mute, https://ntfy.sh/{TOPIC}, body=Mute 10m, headers.X-Priority=1, clear=true; http, Stop, https://ntfy.sh/{TOPIC}, body=mute, headers.X-Priority=1, clear=true;"
+                                },timeout=TIMEOUT)
+                print(f"Empty notification sent for stop {stops_names.get(stop_code, 'Unknown Stop')}.")
+            else:
+                requests.post(f"https://ntfy.sh/{TOPIC}",
+                                data= "Couldn't load data for this stop".encode('utf-8'),
+                                headers={
+                                    "Title": f"No Data - {stops_names.get(stop_code, 'Unknown Stop')}".encode('utf-8'),
+                                    "Priority": "high",
+                                    "Click": f"https://telematics.oasa.gr/content.php#stationInfo_{stop_code}",
+                                    "Markdown": "yes",
+                                    "Tags": "warning,bus",
+                                    "Actions": f"http, Mute, https://ntfy.sh/{TOPIC}, body=Mute 10m, headers.X-Priority=1, clear=true; http, Stop, https://ntfy.sh/{TOPIC}, body=mute, headers.X-Priority=1, clear=true;"
+                                },timeout=TIMEOUT)
+                print(f"Empty notification sent for stop {stops_names.get(stop_code, 'Unknown Stop')}.")
+        else:
+            requests.post(f"https://ntfy.sh/{TOPIC}",
+                            data= f"{f'Arriving in **{current_bus_data_list[stop_code].arrival_time}\'** *({current_bus_data_list[stop_code].bus_name if current_bus_data_list[stop_code].bus_name else 'Unknown Route'})*' if int(current_bus_data_list[stop_code].arrival_time) > 0 else f'Arriving **now** *({current_bus_data_list[stop_code].bus_name if current_bus_data_list[stop_code].bus_name else 'Unknown Route'})*'}{second_arrival_data[stop_code] if second_arrival_data[stop_code] else ''}".encode('utf-8'),
+                            headers={
+                                "Title": f"{current_bus_data_list[stop_code].bus_number} - {stops_names.get(stop_code, 'Unknown Stop')}".encode('utf-8'),
+                                "Priority": "high",
+                                "Click": f"https://telematics.oasa.gr/content.php#stationInfo_{stop_code}",
+                                "Markdown": "yes",
+                                "Tags": "warning,bus",
+                                "Actions": f"http, Mute, https://ntfy.sh/{TOPIC}, body=Mute 10m, headers.X-Priority=1, clear=true; http, Mute route, https://ntfy.sh/{TOPIC}, body=mute {current_bus_data_list[stop_code].route_number}_{current_bus_data_list[stop_code].vehicle_number}, headers.X-Priority=1, clear=true; http, Stop, https://ntfy.sh/{TOPIC}, body=mute, headers.X-Priority=1, clear=true;"
+                            },timeout=TIMEOUT)
+            print(f"Notification sent for route {current_bus_data_list[stop_code].route_number} with vehicle {current_bus_data_list[stop_code].vehicle_number} at stop {stops_names.get(stop_code, 'Unknown Stop')}.")
     except requests.RequestException as e:
         print(f"Error sending notification for route {current_bus_data_list[stop_code].route_number}: {e}")
 
@@ -174,7 +214,7 @@ def listen_for_mute(stop_event):
     while not stop_event.is_set():
         try:
             # Timeout lets the loop periodically check stop_event and exit quickly.
-            with requests.get(subscribe_url, stream=True, timeout=(5, 5)) as response:
+            with requests.get(subscribe_url, stream=True) as response:
                 response.raise_for_status()
                 for line in response.iter_lines():
                     if stop_event.is_set():
@@ -209,6 +249,7 @@ def listen_for_mute(stop_event):
             time.sleep(2)
         except json.JSONDecodeError:
             continue
+    print("Mute listener thread exiting.")
             
 def getStopNameFromCode(stop_codes,stops_names):
     for code in stop_codes:
@@ -291,8 +332,8 @@ def is_remote_or_holiday_today():
         return False
 
 def getCurrentStopCodesWithNames(user_settings_times_list, stop_codes, stop_names):
-    now = datetime.now().time()
-    print(f"Current time: {now}. Checking for bus arrivals...")
+    now = datetime.now()
+    print(f"Current time: {now.time()}. Checking for bus arrivals...")
     # If the user's calendar indicates a remote day, skip notifications
     try:
         if is_remote_or_holiday_today():
@@ -321,10 +362,10 @@ def buildarrivals(stop_code):
         arrivals = requests.get(f"https://telematics.oasa.gr/api/?act=getStopArrivals&p1={stop_code}", timeout=TIMEOUT).json()
         arrivals = arrivals if isinstance(arrivals, list) else []
         arrivals = [x for x in arrivals if x.get("route_code") in tracked_routes_codes]
-        return arrivals
+        return arrivals,True
     except requests.RequestException as e:
         print(f"Error fetching arrivals for stop {stop_code}: {e}")
-        return []
+        return [],False
 
 def buildUserSettings(path):
     user_settings = UserSettings()
@@ -340,6 +381,14 @@ def buildUserSettings(path):
 listener_thread = threading.Thread(target=listen_for_mute, args=(listener_stop_event,), daemon=True)
 listener_thread.start()
 
+def initEmpty(stop_codes,empty_messages):
+    for stop_code in stop_codes:
+        if empty_messages.get(stop_code) == None:
+            empty_messages[stop_code] = None
+    return empty_messages
+
+
+
 if __name__ == "__main__":
     try:
         user_settings = buildUserSettings(USERS_SETTINGS)
@@ -349,6 +398,7 @@ if __name__ == "__main__":
         route_names = {}
         routes_muted = {}
         bus_data_list = {}  
+        empty_messages = {}
         while True:
             if is_muted:
                 print("System is muted. Notification blocked.")
@@ -365,15 +415,21 @@ if __name__ == "__main__":
                 break 
             bus_data_list = createBusDataList(stop_codes,bus_data_list)
             second_arrival_data = createsecondBusList(stop_codes)
+            empty_messages = initEmpty(stop_codes,empty_messages)
             for stop_code in stop_codes:
-                arrivals = buildarrivals(stop_code)
+                arrivals,success = buildarrivals(stop_code)
                 bus = createBus(route_names,arrivals)
                 if bus.is_default():
-                    print(f"No bus data available for stop {stop_code}. Skipping notification.")
-                    continue
+                    if bus_data_list[stop_code].is_default() and empty_messages[stop_code] == None:
+                        print("First call returned no data. Sending empty message")
+                        empty_messages[stop_code] = True
+                    else:
+                        print(f"No bus data available for stop {stop_code}. Skipping notification.")
+                        empty_messages[stop_code] = False
+                        continue
                 buildMuteList(bus)
-                if checkSendNotification(bus,bus_data_list,second_arrival_data,arrivals,stop_code):
-                    sendNotification(bus_data_list,stop_code)
+                if checkSendNotification(bus,bus_data_list,second_arrival_data,arrivals,stop_code,empty_messages[stop_code]):
+                    sendNotification(bus_data_list,stop_code,empty_messages[stop_code],success)
 
             time.sleep(60) # Wait 1 minute before checking again
     finally:
