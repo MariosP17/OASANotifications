@@ -59,17 +59,39 @@ class UserSettingsTime:
         self.stop_codes = stop_codes
 
     def is_in_time_window(self, now : datetime):
-        start_user_dt = datetime.now(ZoneInfo(self.timezone)).replace(
-            hour=int(self.start.split(":")[0]),
-            minute=int(self.start.split(":")[1])
+
+        now = now.astimezone()
+        user_tz = ZoneInfo(self.timezone)
+
+        # Current time in user's timezone
+        now_user = now.astimezone(user_tz)
+
+        # Build proper datetime with today's date
+        start_user_dt = datetime.combine(
+            now_user.date(),
+            datetime.strptime(self.start, "%H:%M").time(),
+            tzinfo=user_tz
         )
-        start_time = start_user_dt.astimezone(now.astimezone().tzinfo).time()
-        end_user_dt = datetime.now(ZoneInfo(self.timezone)).replace(
-            hour=int(self.end.split(":")[0]),
-            minute=int(self.end.split(":")[1])
+
+        end_user_dt = datetime.combine(
+            now_user.date(),
+            datetime.strptime(self.end, "%H:%M").time(),
+            tzinfo=user_tz
         )
-        end_time = end_user_dt.astimezone(now.astimezone().tzinfo).time()
-        return start_time <= now.time() <= end_time
+
+        # Convert back to local timezone
+        start_time = start_user_dt.astimezone(now.tzinfo).time()
+        end_time = end_user_dt.astimezone(now.tzinfo).time()
+
+        now_time = now.time().replace(second=0, microsecond=0)
+
+
+        if start_time <= end_time:
+            print(start_time, "<=", now_time, "<=", end_time)
+            return start_time <= now_time <= end_time
+        else:
+            print(now_time, ">=", start_time, "or", now_time, "<=", end_time)
+            return now_time >= start_time or now_time <= end_time
     
     @staticmethod
     def createUserSettingsTimeList(user_settings_list_dict):
