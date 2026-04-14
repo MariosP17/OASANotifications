@@ -363,8 +363,9 @@ def getCurrentStopCodesWithNames(user_settings_times_list, stop_codes, stop_name
             return [],[]
     except Exception as exc:
         print(f"Calendar check failed: {exc}")
-    if any(times.is_in_time_window(now) for times in user_settings_times_list):
-        times = [t for t in user_settings_times_list if t.is_in_time_window(now)][0]  # Get the first matching settings
+    alltimes = [t for t in user_settings_times_list if t.is_in_time_window(now)]
+    if len(alltimes) > 0:
+        times = alltimes[0]  # Get the first matching settings
         if set(times.stop_codes) == set(stop_codes):
             print("Stop codes haven't changed since last check. Skipping API call.")
             none_codes = [code for code in times.stop_codes if stop_names.get(code) is None]
@@ -449,6 +450,9 @@ if __name__ == "__main__":
                         print(f"No bus data available for stop {stop_code}. Skipping notification.")
                         empty_messages[stop_code] = False
                         continue
+                else:
+                    if empty_messages[stop_code]:
+                        empty_messages[stop_code] = False
                 buildMuteList(bus)
                 if checkSendNotification(bus,bus_data_list,second_arrival_data,arrivals,stop_code,empty_messages[stop_code]):
                     sendNotification(bus_data_list,stop_code,empty_messages[stop_code],success)
