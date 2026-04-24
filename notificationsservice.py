@@ -20,7 +20,7 @@ TOPIC = os.getenv("TOPIC_NAME")
 WORK_CALENDAR_ID = os.getenv("WORK_CALENDAR_ID")
 HOLIDAYS_CALENDAR_ID = os.getenv("HOLIDAYS_CALENDAR_ID")
 USERS_SETTINGS = os.getenv("usersettings_file_path")
-TIMEOUT = (5, 15)  # (connect timeout, read timeout) in seconds
+TIMEOUT = (15, 15)  # (connect timeout, read timeout) in seconds
 
 # Google Calendar read-only scope
 SCOPES = [os.getenv("GOOGLE_CALENDAR_SCOPE")]
@@ -123,13 +123,13 @@ def createBus(route_names,arrivals):
     if (len(arrivals)) == 0:
         return bus_data
     bus = arrivals[0]
-    if bus["route_code"] in tracked_routes_codes:
-        bus_data.bus_number = tracked_routes_codes[bus["route_code"]]
-        bus_data.route_number = bus["route_code"]
+    if str(bus["route_code"]) in tracked_routes_codes.keys():
+        bus_data.bus_number = tracked_routes_codes[str(bus["route_code"])]
+        bus_data.route_number = str(bus["route_code"])
         bus_data.arrival_time = bus["btime2"]
         bus_data.vehicle_number = bus["veh_code"]
-        if route_names.get(bus["route_code"]) is not None:
-            bus_data.bus_name = route_names[bus["route_code"]]
+        if route_names.get(str(bus["route_code"])) is not None:
+            bus_data.bus_name = route_names[str(bus["route_code"])]
         else:
             try:
                 print(f"Fetching route name for route {bus['route_code']}...")
@@ -137,10 +137,10 @@ def createBus(route_names,arrivals):
                 if response2.status_code == 200:
                     data = response2.json()
                     bus_data.bus_name = data[0].get("route_descr", None)
-                    route_names[bus["route_code"]] = bus_data.bus_name
+                    route_names[str(bus["route_code"])] = bus_data.bus_name
                 else:
                     bus_data.bus_name = None
-                    route_names[bus["route_code"]] = bus_data.bus_name
+                    route_names[str(bus["route_code"])] = bus_data.bus_name
             except requests.RequestException as e:
                 print(f"Error fetching route name for route {bus['route_code']}: {e}")
 
@@ -277,6 +277,7 @@ def getStopNameFromCode(stop_codes,stops_names):
     for code in stop_codes:
         if stops_names.get(code) == f"Unknown Stop {code}" or stops_names.get(code) is None:
             try:
+                print(f"Fetching name for stop {code}...")
                 response = requests.get(f"https://telematics.oasa.gr/api/?act=getStopNameAndXY&p1={code}", timeout=TIMEOUT)
                 response.raise_for_status()
                 data = response.json()
@@ -384,7 +385,7 @@ def buildarrivals(stop_code):
         print(f"Fetching arrivals for stop {stop_code}...")
         arrivals = requests.get(f"https://telematics.oasa.gr/api/?act=getStopArrivals&p1={stop_code}", timeout=TIMEOUT).json()
         arrivals = arrivals if isinstance(arrivals, list) else []
-        arrivals = [x for x in arrivals if x.get("route_code") in tracked_routes_codes]
+        arrivals = [x for x in arrivals if str(x.get("route_code")) in tracked_routes_codes]
         return arrivals,True
     except requests.RequestException as e:
         print(f"Error fetching arrivals for stop {stop_code}: {e}")
