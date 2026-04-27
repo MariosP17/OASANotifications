@@ -20,6 +20,7 @@ TOPIC = os.getenv("TOPIC_NAME")
 WORK_CALENDAR_ID = os.getenv("WORK_CALENDAR_ID")
 HOLIDAYS_CALENDAR_ID = os.getenv("HOLIDAYS_CALENDAR_ID")
 USERS_SETTINGS = os.getenv("usersettings_file_path")
+STOP_NAMES = os.getenv("stopsnames_file_path")
 TIMEOUT = (15, 15)  # (connect timeout, read timeout) in seconds
 
 # Google Calendar read-only scope
@@ -47,9 +48,10 @@ class BusData:
             )
 
 class UserSettings:
-    def __init__(self, user_settings_times_list_dict= {}, tracked_routes_codes = {}):
+    def __init__(self, user_settings_times_list_dict= {}, tracked_routes_codes = {}, stop_names = {}):
         self.user_settings_times_list = UserSettingsTime.createUserSettingsTimeList(user_settings_times_list_dict)
         self.tracked_routes_codes = tracked_routes_codes
+        self.stop_names = stop_names
 
 class UserSettingsTime:
     def __init__(self, start = "00:00", end = "23:59",timezone = "Europe/Athens", stop_codes = []):
@@ -391,14 +393,17 @@ def buildarrivals(stop_code):
         print(f"Error fetching arrivals for stop {stop_code}: {e}")
         return [],False
 
-def buildUserSettings(path):
+def buildUserSettings(path, stopspath):
     user_settings = UserSettings()
     try:
         with open(path, 'r') as f:
             data = json.load(f)
             times = data.get("times", [])
             tracked_routes_codes = data.get("tracked_routes_codes", {})
-            user_settings = UserSettings(user_settings_times_list_dict=times, tracked_routes_codes=tracked_routes_codes)
+        with open(stopspath, 'r') as f2:
+            stop_data = json.load(f2)
+            stop_names = stop_data.get("stop_names", {})
+        user_settings = UserSettings(user_settings_times_list_dict=times, tracked_routes_codes=tracked_routes_codes, stop_names=stop_names)
     except Exception as exc:
         print(f"Error loading user settings: {exc}")
     return user_settings
@@ -411,14 +416,24 @@ def initEmpty(stop_codes,empty_messages):
             empty_messages[stop_code] = None
     return empty_messages
 
+def saveStopNames():
+    try:
+        print("Saving stop names to file...")
+        data = {
+            "stop_names": stops_names
+        }
 
+        with open(STOP_NAMES, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as exc:
+        print(f"Error saving stop names: {exc}")
 
 if __name__ == "__main__":
     try:
-        user_settings = buildUserSettings(USERS_SETTINGS)
+        user_settings = buildUserSettings(USERS_SETTINGS, STOP_NAMES)
         tracked_routes_codes = user_settings.tracked_routes_codes
         stop_codes = []
-        stops_names = {}
+        stops_names = user_settings.stop_names
         route_names = {}
         routes_muted = {}
         bus_data_list = {}  
@@ -460,5 +475,6 @@ if __name__ == "__main__":
 
             time.sleep(60) # Wait 1 minute before checking again
     finally:
+        saveStopNames()
         listener_stop_event.set()
         listener_thread.join(timeout=6)
