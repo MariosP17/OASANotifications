@@ -171,12 +171,12 @@ def checkSendNotification(bus: BusData, current_bus_data_list: dict, second_arri
 
         #Skip if arrival time hasn't changed at all
         if new_time == old_time:
-            print(f"No change in arrival time ({old_time}). Skipping notification for route {bus.route_number}.")
+            print(f"No change in arrival time ({old_time}). Skipping notification for route {bus.route_number} on stop {stops_names.get(stop_code)}.")
             return False
 
         #Skip if change is small (<5 min) and remaining time is above 5 minutes
         if current_bus_data_list[stop_code].arrival_time != "-1" and 0 < (old_time - new_time) < 5 and new_time > 4:
-            print(f"Arrival time hasn't changed significantly ({old_time} -> {new_time}). Skipping notification for route {bus.route_number}.")
+            print(f"Arrival time hasn't changed significantly ({old_time} -> {new_time}). Skipping notification for route {bus.route_number} on stop {stops_names.get(stop_code)}.")
             return False
         if (len(arrivals) > 1 and any(arrival.get("route_code") == bus.route_number and arrival.get("veh_code") != bus.vehicle_number for arrival in arrivals) and int(bus.arrival_time) <= 4):
             print(f"First bus is too close. Adding second bus notification data.")
@@ -274,7 +274,6 @@ def listen_for_mute(stop_event):
         except json.JSONDecodeError:
             continue
     print("Mute listener thread exiting.")
-            
 def getStopNameFromCode(stop_codes,stops_names):
     for code in stop_codes:
         if stops_names.get(code) == f"Unknown Stop {code}" or stops_names.get(code) is None:
@@ -370,11 +369,12 @@ def getCurrentStopCodesWithNames(user_settings_times_list, stop_codes, stop_name
     if len(alltimes) > 0:
         times = alltimes[0]  # Get the first matching settings
         if set(times.stop_codes) == set(stop_codes):
-            print("Stop codes haven't changed since last check. Skipping API call.")
-            none_codes = [code for code in times.stop_codes if stop_names.get(code) is None]
+            none_codes = [code for code in times.stop_codes if stop_names.get(code) is None or stop_names.get(code) == f"Unknown Stop {code}"]
             if none_codes:
                 for code in none_codes:
                     stop_names[code] = getStopNameFromCode([code], stop_names).get(code, f"Unknown Stop {code}")
+            else:
+                print("Stop codes haven't changed since last check. Skipping API call.")
             return stop_codes, stop_names
         stop_names = getStopNameFromCode(times.stop_codes, stop_names)
         return times.stop_codes, stop_names
@@ -416,15 +416,19 @@ def initEmpty(stop_codes,empty_messages):
             empty_messages[stop_code] = None
     return empty_messages
 
-def saveStopNames():
+def checkandSaveStopNames():
     try:
-        print("Saving stop names to file...")
-        data = {
-            "stop_names": stops_names
-        }
+        with open(STOP_NAMES, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            existing_stop_names = data.get("stop_names", {})
+        if type(stops_names) == dict and len(stops_names) > len(existing_stop_names):
+            print("Saving stop names to file...")
+            data = {
+                "stop_names": stops_names
+            }
 
-        with open(STOP_NAMES, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+            with open(STOP_NAMES, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
     except Exception as exc:
         print(f"Error saving stop names: {exc}")
 
@@ -463,7 +467,7 @@ if __name__ == "__main__":
                         print("First call returned no data. Sending empty message")
                         empty_messages[stop_code] = True
                     else:
-                        print(f"No bus data available for stop {stop_code}. Skipping notification.")
+                        print(f"No bus data available for stop {stops_names.get(stop_code)}. Skipping notification.")
                         empty_messages[stop_code] = False
                         continue
                 else:
@@ -474,7 +478,7 @@ if __name__ == "__main__":
                     sendNotification(bus_data_list,stop_code,empty_messages[stop_code],success)
 
             time.sleep(60) # Wait 1 minute before checking again
+        checkandSaveStopNames()
     finally:
-        saveStopNames()
         listener_stop_event.set()
         listener_thread.join(timeout=6)
