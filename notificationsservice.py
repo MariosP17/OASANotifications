@@ -5,8 +5,9 @@ import time
 import threading
 import json
 import os
-from datetime import datetime
+from datetime import date, datetime
 from datetime import timedelta
+from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
 
 from google.oauth2.credentials import Credentials
@@ -171,7 +172,7 @@ def checkSendNotification(bus: BusData, current_bus_data_list: dict, second_arri
 
         #Skip if arrival time hasn't changed at all
         if new_time == old_time:
-            print(f"No change in arrival time ({old_time}). Skipping notification for route {bus.route_number} on stop {stops_names.get(stop_code)}.")
+            print(f"No change in arrival time ({old_time}). Skipping notification for route {bus.route_number} on stop {stops_names.get(stop_code, {}).get('name')}.")
             return False
 
         #Skip if change is small (<5 min) and remaining time is above 5 minutes
@@ -192,38 +193,38 @@ def sendNotification(current_bus_data_list: dict, stop_code: str, sendEmpty :boo
                 requests.post(f"https://ntfy.sh/{TOPIC}",
                                 data= "No bus is arriving at this stop right now".encode('utf-8'),
                                 headers={
-                                    "Title": f"No Data - {stops_names.get(stop_code, 'Unknown Stop')}".encode('utf-8'),
+                                    "Title": f"No Data - {stops_names.get(stop_code, {}).get('name')}".encode('utf-8'),
                                     "Priority": "high",
                                     "Click": f"https://telematics.oasa.gr/content.php#stationInfo_{stop_code}",
                                     "Markdown": "yes",
                                     "Tags": "warning,bus",
                                     "Actions": f"http, Mute, https://ntfy.sh/{TOPIC}, body=Mute 10m, headers.X-Priority=1, clear=true; http, Stop, https://ntfy.sh/{TOPIC}, body=mute, headers.X-Priority=1, clear=true;"
                                 },timeout=TIMEOUT)
-                print(f"Empty notification sent for stop {stops_names.get(stop_code, 'Unknown Stop')}.")
+                print(f"Empty notification sent for stop {stops_names.get(stop_code, {}).get('name')}.")
             else:
                 requests.post(f"https://ntfy.sh/{TOPIC}",
                                 data= "Couldn't load data for this stop".encode('utf-8'),
                                 headers={
-                                    "Title": f"No Data - {stops_names.get(stop_code, 'Unknown Stop')}".encode('utf-8'),
+                                    "Title": f"No Data - {stops_names.get(stop_code, {}).get('name')}".encode('utf-8'),
                                     "Priority": "high",
                                     "Click": f"https://telematics.oasa.gr/content.php#stationInfo_{stop_code}",
                                     "Markdown": "yes",
                                     "Tags": "warning,bus",
                                     "Actions": f"http, Mute, https://ntfy.sh/{TOPIC}, body=Mute 10m, headers.X-Priority=1, clear=true; http, Stop, https://ntfy.sh/{TOPIC}, body=mute, headers.X-Priority=1, clear=true;"
                                 },timeout=TIMEOUT)
-                print(f"Empty notification sent for stop {stops_names.get(stop_code, 'Unknown Stop')}.")
+                print(f"Empty notification sent for stop {stops_names.get(stop_code, {}).get('name')}.")
         else:
             requests.post(f"https://ntfy.sh/{TOPIC}",
                             data= f"{f'Arriving in **{current_bus_data_list[stop_code].arrival_time}\'** *({current_bus_data_list[stop_code].bus_name if current_bus_data_list[stop_code].bus_name else 'Unknown Route'})*' if int(current_bus_data_list[stop_code].arrival_time) > 0 else f'Arriving **now** *({current_bus_data_list[stop_code].bus_name if current_bus_data_list[stop_code].bus_name else 'Unknown Route'})*'}{second_arrival_data[stop_code] if second_arrival_data[stop_code] else ''}".encode('utf-8'),
                             headers={
-                                "Title": f"{current_bus_data_list[stop_code].bus_number} - {stops_names.get(stop_code, 'Unknown Stop')}".encode('utf-8'),
+                                "Title": f"{current_bus_data_list[stop_code].bus_number} - {stops_names.get(stop_code, {}).get('name')}".encode('utf-8'),
                                 "Priority": "high",
                                 "Click": f"https://telematics.oasa.gr/content.php#stationInfo_{stop_code}",
                                 "Markdown": "yes",
                                 "Tags": "warning,bus",
                                 "Actions": f"http, Mute, https://ntfy.sh/{TOPIC}, body=Mute 10m, headers.X-Priority=1, clear=true; http, Mute route, https://ntfy.sh/{TOPIC}, body=mute {current_bus_data_list[stop_code].route_number}_{current_bus_data_list[stop_code].vehicle_number}, headers.X-Priority=1, clear=true; http, Stop, https://ntfy.sh/{TOPIC}, body=mute, headers.X-Priority=1, clear=true;"
                             },timeout=TIMEOUT)
-            print(f"Notification sent for route {current_bus_data_list[stop_code].route_number} with vehicle {current_bus_data_list[stop_code].vehicle_number} at stop {stops_names.get(stop_code, 'Unknown Stop')}.")
+            print(f"Notification sent for route {current_bus_data_list[stop_code].route_number} with vehicle {current_bus_data_list[stop_code].vehicle_number} at stop {stops_names.get(stop_code, {}).get('name')}.")
     except requests.RequestException as e:
         print(f"Error sending notification for route {current_bus_data_list[stop_code].route_number}: {e}")
 
@@ -276,22 +277,25 @@ def listen_for_mute(stop_event):
     print("Mute listener thread exiting.")
 def getStopNameFromCode(stop_codes,stops_names):
     for code in stop_codes:
-        if stops_names.get(code) == f"Unknown Stop {code}" or stops_names.get(code) is None:
+        if  stops_names.get(code) is None or stops_names.get(code).get('name') == f"Unknown Stop {code}" or datetime.strptime(stops_names.get(code, {}).get("last_update", "2020-01-01"),"%Y-%m-%d").date() <= date.today() - relativedelta(months=1):
             try:
                 print(f"Fetching name for stop {code}...")
                 response = requests.get(f"https://telematics.oasa.gr/api/?act=getStopNameAndXY&p1={code}", timeout=TIMEOUT)
                 response.raise_for_status()
                 data = response.json()
                 if isinstance(data, list) and data:
-                    stops_names[code] = data[0].get("stop_descr", f"Unknown Stop {code}")
+                    stops_names[code] = {"name": data[0].get("stop_descr", f"Unknown Stop {code}"), "last_update": datetime.now().strftime("%Y-%m-%d")}
                 else:
-                    stops_names[code] = f"Unknown Stop {code}"
+                    if stops_names.get(code, {}).get("name") is None or "unknown" in (stops_names.get(code, {}).get("name")).lower():
+                        stops_names[code] = {"name": f"Unknown Stop {code}", "last_update": "2020-01-01"}
             except requests.RequestException as exc:
                 print(f"Failed to fetch name for stop {code}: {exc}")
-                stops_names[code] = f"Unknown Stop {code}"
+                if stops_names.get(code, {}).get("name") is None or "unknown" in (stops_names.get(code, {}).get("name")).lower():
+                    stops_names[code] = {"name": f"Unknown Stop {code}", "last_update": "2020-01-01"}
             except ValueError:
                 print(f"Invalid name data for stop {code}")
-                stops_names[code] = f"Unknown Stop {code}"
+                if stops_names.get(code, {}).get("name") is None or "unknown" in (stops_names.get(code, {}).get("name")).lower():
+                    stops_names[code] = {"name": f"Unknown Stop {code}", "last_update": "2020-01-01"}
     return stops_names
 
 
@@ -368,15 +372,12 @@ def getCurrentStopCodesWithNames(user_settings_times_list, stop_codes, stop_name
     alltimes = [t for t in user_settings_times_list if t.is_in_time_window(now)]
     if len(alltimes) > 0:
         times = alltimes[0]  # Get the first matching settings
-        if set(times.stop_codes) == set(stop_codes):
-            none_codes = [code for code in times.stop_codes if stop_names.get(code) is None or stop_names.get(code) == f"Unknown Stop {code}"]
-            if none_codes:
-                for code in none_codes:
-                    stop_names[code] = getStopNameFromCode([code], stop_names).get(code, f"Unknown Stop {code}")
-            else:
-                print("Stop codes haven't changed since last check. Skipping API call.")
-            return stop_codes, stop_names
-        stop_names = getStopNameFromCode(times.stop_codes, stop_names)
+        none_codes = [code for code in times.stop_codes if stop_names.get(code) is None or stop_names.get(code)["name"] == f"Unknown Stop {code}" or datetime.strptime(stops_names.get(code)["last_update"],"%Y-%m-%d").date() <= date.today() - relativedelta(months=1)]
+        if none_codes:
+            for code in none_codes:
+                stop_names[code] = getStopNameFromCode([code], stop_names).get(code, f"Unknown Stop {code}")
+        else:
+            print("Stop codes haven't changed since last check. Skipping API call.")
         return times.stop_codes, stop_names
     else:
         print("Outside of specified time windows. No notifications will be sent.")
@@ -421,7 +422,7 @@ def checkandSaveStopNames():
         with open(STOP_NAMES, 'r', encoding='utf-8') as f:
             data = json.load(f)
             existing_stop_names = data.get("stop_names", {})
-        if type(stops_names) == dict and len(stops_names) > len(existing_stop_names):
+        if type(stops_names) == dict and (len(stops_names) > len(existing_stop_names) or any(datetime.strptime(stops_names.get(code, {}).get("last_update"), "%Y-%m-%d").date() > datetime.strptime(existing_stop_names.get(code, {}).get("last_update"), "%Y-%m-%d").date() and "unknown" not in (stops_names.get(code, {}).get("name")).lower() for code in stops_names)):
             print("Saving stop names to file...")
             data = {
                 "stop_names": stops_names
@@ -467,7 +468,7 @@ if __name__ == "__main__":
                         print("First call returned no data. Sending empty message")
                         empty_messages[stop_code] = True
                     else:
-                        print(f"No bus data available for stop {stops_names.get(stop_code)}. Skipping notification.")
+                        print(f"No bus data available for stop {stops_names.get(stop_code, {}).get('name')}. Skipping notification.")
                         empty_messages[stop_code] = False
                         continue
                 else:
