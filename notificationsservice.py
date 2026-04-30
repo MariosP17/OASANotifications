@@ -65,39 +65,23 @@ class UserSettingsTime:
 
     def is_in_time_window(self, now : datetime):
 
-        now = now.astimezone()
         user_tz = ZoneInfo(self.timezone)
 
-        # Current time in user's timezone
-        now_user = now.astimezone(user_tz)
+        start_time = datetime.strptime(self.start, "%H:%M").time()
+        end_time = datetime.strptime(self.end, "%H:%M").time()
 
-        # Build proper datetime with today's date
-        start_user_dt = datetime.combine(
-            now_user.date(),
-            datetime.strptime(self.start, "%H:%M").time(),
-            tzinfo=user_tz
-        )
-
-        end_user_dt = datetime.combine(
-            now_user.date(),
-            datetime.strptime(self.end, "%H:%M").time(),
-            tzinfo=user_tz
-        )
-
-        # Convert back to local timezone
-        start_time = start_user_dt.astimezone(now.tzinfo).time()
-        end_time = end_user_dt.astimezone(now.tzinfo).time()
-
-        now_time = now.time().replace(second=0, microsecond=0)
+        now_user_time = now.astimezone(user_tz).time().replace(second=0, microsecond=0)
 
 
         if start_time <= end_time:
-            print(start_time, "<=", now_time, "<=", end_time)
-            return start_time <= now_time <= end_time
+            check = "✅" if start_time <= now_user_time <= end_time else "❌"
+            print(UserSettingsTime.getUTCTimeString(start_time, user_tz, now), "<=", UserSettingsTime.getUTCTimeString(now_user_time, user_tz, now), "<=", UserSettingsTime.getUTCTimeString(end_time, user_tz, now), check)
+            return start_time <= now_user_time <= end_time
         else:
-            print(now_time, ">=", start_time, "or", now_time, "<=", end_time)
-            return now_time >= start_time or now_time <= end_time
-    
+            check = "✅" if now_user_time >= start_time or now_user_time <= end_time else "❌"
+            print(UserSettingsTime.getUTCTimeString(now_user_time, user_tz, now), ">=", UserSettingsTime.getUTCTimeString(start_time, user_tz, now), "or", UserSettingsTime.getUTCTimeString(now_user_time, user_tz, now), "<=", UserSettingsTime.getUTCTimeString(end_time, user_tz, now), check)
+            return now_user_time >= start_time or now_user_time <= end_time
+
     @staticmethod
     def createUserSettingsTimeList(user_settings_list_dict):
         user_settings_list = []
@@ -110,7 +94,10 @@ class UserSettingsTime:
             )
             user_settings_list.append(user_settings)
         return user_settings_list
-
+    @staticmethod
+    def getUTCTimeString(local_time, timezone, now):
+        return str(local_time.strftime("%H:%M")) + " UTC+" + str(int(timezone.utcoffset(now).total_seconds() / 3600))
+    
 def createBusDataList(stop_codes,current_list):
     for stop_code in stop_codes:
             if current_list.get(stop_code) is None:
@@ -383,7 +370,7 @@ def is_remote_or_holiday_today():
 
 def getCurrentStopCodesWithNames(user_settings_times_list, stop_codes, stop_names):
     now = datetime.now()
-    print(f"Current time: {now.time()}. Checking for bus arrivals...")
+    print(f"Current time: {now.astimezone(ZoneInfo(user_settings_times_list[0].timezone)).time()}. Checking for bus arrivals...")
     # If the user's calendar indicates a remote day, skip notifications
     try:
         if is_remote_or_holiday_today():
