@@ -22,6 +22,7 @@ WORK_CALENDAR_ID = os.getenv("WORK_CALENDAR_ID")
 HOLIDAYS_CALENDAR_ID = os.getenv("HOLIDAYS_CALENDAR_ID")
 USERS_SETTINGS = os.getenv("usersettings_file_path")
 STOP_NAMES = os.getenv("stopsnames_file_path")
+ROUTE_NAMES = os.getenv("routenames_file_path")
 TIMEOUT = (15, 15)  # (connect timeout, read timeout) in seconds
 
 # Google Calendar read-only scope
@@ -49,10 +50,11 @@ class BusData:
             )
 
 class UserSettings:
-    def __init__(self, user_settings_times_list_dict= {}, tracked_routes_codes = {}, stop_names = {}):
+    def __init__(self, user_settings_times_list_dict= {}, tracked_routes_codes = {}, stop_names = {}, route_names = {}):
         self.user_settings_times_list = UserSettingsTime.createUserSettingsTimeList(user_settings_times_list_dict)
         self.tracked_routes_codes = tracked_routes_codes
         self.stop_names = stop_names
+        self.route_names = route_names
 
 class UserSettingsTime:
     def __init__(self, start = "00:00", end = "23:59",timezone = "Europe/Athens", stop_codes = []):
@@ -131,8 +133,9 @@ def createBus(route_names,arrivals):
         bus_data.route_number = str(bus["route_code"])
         bus_data.arrival_time = bus["btime2"]
         bus_data.vehicle_number = bus["veh_code"]
-        if route_names.get(str(bus["route_code"])) is not None:
-            bus_data.bus_name = route_names[str(bus["route_code"])]
+        if route_names.get(str(bus["route_code"]), {}).get("name") is not None and datetime.strptime(route_names.get(str(bus["route_code"]), {}).get("last_update"), "%Y-%m-%d").date() + relativedelta(months=1) >= date.today():
+            print(f"Route name for route {bus['route_code']} already fetched recently. Using cached value.")
+            bus_data.bus_name = route_names[str(bus["route_code"])]["name"]
         else:
             try:
                 print(f"Fetching route name for route {bus['route_code']}...")
@@ -140,12 +143,31 @@ def createBus(route_names,arrivals):
                 if response2.status_code == 200:
                     data = response2.json()
                     bus_data.bus_name = data[0].get("route_descr", None)
-                    route_names[str(bus["route_code"])] = bus_data.bus_name
+                    route_names[str(bus["route_code"])] = {
+                        "name": bus_data.bus_name,
+                        "last_update": datetime.now().strftime("%Y-%m-%d")
+                    }
                 else:
-                    bus_data.bus_name = None
-                    route_names[str(bus["route_code"])] = bus_data.bus_name
+                    if route_names.get(str(bus["route_code"]), {}).get("name") is None:
+                        bus_data.bus_name = None
+                        route_names[str(bus["route_code"])] = {
+                            "name": bus_data.bus_name,
+                            "last_update": "2020-01-01"
+                        }
+                    else:
+                        print(f"Failed to fetch route name for route {bus['route_code']}. Status code: {response2.status_code}. Using cached value if available.")
+                        bus_data.bus_name = route_names.get(str(bus["route_code"]), {}).get("name")
             except requests.RequestException as e:
                 print(f"Error fetching route name for route {bus['route_code']}: {e}")
+                if route_names.get(str(bus["route_code"]), {}).get("name") is None:
+                    bus_data.bus_name = None
+                    route_names[str(bus["route_code"])] = {
+                        "name": bus_data.bus_name,
+                        "last_update": "2020-01-01"
+                    }   
+                else:
+                    print(f"Failed to fetch route name for route {bus['route_code']}. Status code: {response2.status_code}. Using cached value if available.")
+                    bus_data.bus_name = route_names.get(str(bus["route_code"]), {}).get("name") 
 
     return bus_data 
 
@@ -177,7 +199,7 @@ def checkSendNotification(bus: BusData, current_bus_data_list: dict, second_arri
 
         #Skip if change is small (<5 min) and remaining time is above 5 minutes
         if current_bus_data_list[stop_code].arrival_time != "-1" and 0 < (old_time - new_time) < 5 and new_time > 4:
-            print(f"Arrival time hasn't changed significantly ({old_time} -> {new_time}). Skipping notification for route {bus.route_number} on stop {stops_names.get(stop_code)}.")
+            print(f"Arrival time hasn't changed significantly ({old_time} -> {new_time}). Skipping notification for route {bus.route_number} on stop {stops_names.get(stop_code,{}).get('name')}.")
             return False
         if (len(arrivals) > 1 and any(arrival.get("route_code") == bus.route_number and arrival.get("veh_code") != bus.vehicle_number for arrival in arrivals) and int(bus.arrival_time) <= 4):
             print(f"First bus is too close. Adding second bus notification data.")
@@ -394,7 +416,7 @@ def buildarrivals(stop_code):
         print(f"Error fetching arrivals for stop {stop_code}: {e}")
         return [],False
 
-def buildUserSettings(path, stopspath):
+def buildUserSettings(path, stopspath, routespath):
     user_settings = UserSettings()
     try:
         with open(path, 'r') as f:
@@ -404,7 +426,10 @@ def buildUserSettings(path, stopspath):
         with open(stopspath, 'r') as f2:
             stop_data = json.load(f2)
             stop_names = stop_data.get("stop_names", {})
-        user_settings = UserSettings(user_settings_times_list_dict=times, tracked_routes_codes=tracked_routes_codes, stop_names=stop_names)
+        with open(routespath, 'r') as f3:
+            route_data = json.load(f3)
+            route_names = route_data.get("route_names", {})
+        user_settings = UserSettings(user_settings_times_list_dict=times, tracked_routes_codes=tracked_routes_codes, stop_names=stop_names, route_names=route_names)
     except Exception as exc:
         print(f"Error loading user settings: {exc}")
     return user_settings
@@ -433,13 +458,29 @@ def checkandSaveStopNames():
     except Exception as exc:
         print(f"Error saving stop names: {exc}")
 
+def checkandSaveRouteNames():
+    try:
+        with open(ROUTE_NAMES, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            existing_route_names = data.get("route_names", {})
+        if type(route_names) == dict and (len(route_names) > len(existing_route_names) or any(datetime.strptime(route_names.get(route_code, {}).get("last_update"), "%Y-%m-%d").date() > datetime.strptime(existing_route_names.get(route_code, {}).get("last_update"), "%Y-%m-%d").date() for route_code in route_names)):
+            print("Saving route names to file...")
+            data = {
+                "route_names": route_names
+            }
+
+            with open(ROUTE_NAMES, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as exc:
+        print(f"Error saving route names: {exc}")
+
 if __name__ == "__main__":
     try:
-        user_settings = buildUserSettings(USERS_SETTINGS, STOP_NAMES)
+        user_settings = buildUserSettings(USERS_SETTINGS, STOP_NAMES, ROUTE_NAMES)
         tracked_routes_codes = user_settings.tracked_routes_codes
         stop_codes = []
         stops_names = user_settings.stop_names
-        route_names = {}
+        route_names = user_settings.route_names
         routes_muted = {}
         bus_data_list = {}  
         empty_messages = {}
@@ -480,6 +521,7 @@ if __name__ == "__main__":
 
             time.sleep(60) # Wait 1 minute before checking again
         checkandSaveStopNames()
+        checkandSaveRouteNames()
     finally:
         listener_stop_event.set()
         listener_thread.join(timeout=6)
