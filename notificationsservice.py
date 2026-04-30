@@ -264,7 +264,7 @@ def listen_for_mute(stop_event):
                         route_code = message.split(" ",1)[1].split("_",1)[0].strip()
                         veh_code = message.split(" ",1)[1].split("_",1)[1].strip()
                         print(f"Received specific mute command: {message}")
-                        routes_muted[route_code][veh_code] = True
+                        routes_muted[route_code][int(veh_code)] = True
         except (requests.exceptions.ReadTimeout, requests.exceptions.Timeout):
             continue
         except requests.RequestException as exc:
