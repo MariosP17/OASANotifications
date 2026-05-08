@@ -171,8 +171,8 @@ def buildMuteList(bus: BusData):
                 # Add/update the new vehicle as False
                 inner[bus.vehicle_number] = False
 
-def checkSendNotification(bus: BusData, current_bus_data_list: dict, second_arrival_data: dict, arrivals: list, stop_code: str,empty_message: bool):
-    if not empty_message:
+def checkSendNotification(bus: BusData, current_bus_data_list: dict, second_arrival_data: dict, arrivals: list, stop_code: str,empty_message: bool, success_message: bool):
+    if success_message and not empty_message :
         if routes_muted.get(bus.route_number, {}).get(bus.vehicle_number, False):
             print(f"Vehicle {bus.vehicle_number} on route {bus.route_number} is muted. Skipping notification.")
             return False
@@ -188,9 +188,9 @@ def checkSendNotification(bus: BusData, current_bus_data_list: dict, second_arri
         if current_bus_data_list[stop_code].arrival_time != "-1" and 0 < (old_time - new_time) < 5 and new_time > 4:
             print(f"Arrival time hasn't changed significantly ({old_time} -> {new_time}). Skipping notification for route {bus.route_number} on stop {stops_names.get(stop_code,{}).get('name')}.")
             return False
-        if (len(arrivals) > 1 and any(arrival.get("route_code") == bus.route_number and arrival.get("veh_code") != bus.vehicle_number for arrival in arrivals) and int(bus.arrival_time) <= 4):
+        if (len(arrivals) > 1 and any(str(arrival.get("route_code")) == bus.route_number and arrival.get("veh_code") != bus.vehicle_number for arrival in arrivals) and int(bus.arrival_time) <= 4):
             print(f"First bus is too close. Adding second bus notification data.")
-            chosen_arrival = [arrival for arrival in arrivals if arrival.get("route_code") == bus.route_number and arrival.get("veh_code") != bus.vehicle_number][0]
+            chosen_arrival = [arrival for arrival in arrivals if str(arrival.get("route_code")) == bus.route_number and arrival.get("veh_code") != bus.vehicle_number][0]
             second_arrival_data[stop_code] = f"\nNext in **{chosen_arrival['btime2']}\'**" if int(chosen_arrival['btime2']) > 0 else "\nNext arriving **now**!"
         current_bus_data_list[stop_code] = bus
     return True
@@ -223,17 +223,30 @@ def sendNotification(current_bus_data_list: dict, stop_code: str, sendEmpty :boo
                                 },timeout=TIMEOUT)
                 print(f"Empty notification sent for stop {stops_names.get(stop_code, {}).get('name')}.")
         else:
-            requests.post(f"https://ntfy.sh/{TOPIC}",
-                            data= f"{f'Arriving in **{current_bus_data_list[stop_code].arrival_time}\'** *({current_bus_data_list[stop_code].bus_name if current_bus_data_list[stop_code].bus_name else 'Unknown Route'})*' if int(current_bus_data_list[stop_code].arrival_time) > 0 else f'Arriving **now** *({current_bus_data_list[stop_code].bus_name if current_bus_data_list[stop_code].bus_name else 'Unknown Route'})*'}{second_arrival_data[stop_code] if second_arrival_data[stop_code] else ''}".encode('utf-8'),
-                            headers={
-                                "Title": f"{current_bus_data_list[stop_code].bus_number} - {stops_names.get(stop_code, {}).get('name')}".encode('utf-8'),
-                                "Priority": "high",
-                                "Click": f"https://telematics.oasa.gr/content.php#stationInfo_{stop_code}",
-                                "Markdown": "yes",
-                                "Tags": "warning,bus",
-                                "Actions": f"http, Mute, https://ntfy.sh/{TOPIC}, body=Mute 10m, headers.X-Priority=1, clear=true; http, Mute route, https://ntfy.sh/{TOPIC}, body=mute {current_bus_data_list[stop_code].route_number}_{current_bus_data_list[stop_code].vehicle_number}, headers.X-Priority=1, clear=true; http, Stop, https://ntfy.sh/{TOPIC}, body=mute, headers.X-Priority=1, clear=true;"
-                            },timeout=TIMEOUT)
-            print(f"Notification sent for route {current_bus_data_list[stop_code].route_number} with vehicle {current_bus_data_list[stop_code].vehicle_number} at stop {stops_names.get(stop_code, {}).get('name')}.")
+            if success:
+                requests.post(f"https://ntfy.sh/{TOPIC}",
+                                data= f"{f'Arriving in **{current_bus_data_list[stop_code].arrival_time}\'** *({current_bus_data_list[stop_code].bus_name if current_bus_data_list[stop_code].bus_name else 'Unknown Route'})*' if int(current_bus_data_list[stop_code].arrival_time) > 0 else f'Arriving **now** *({current_bus_data_list[stop_code].bus_name if current_bus_data_list[stop_code].bus_name else 'Unknown Route'})*'}{second_arrival_data[stop_code] if second_arrival_data[stop_code] else ''}".encode('utf-8'),
+                                headers={
+                                    "Title": f"{current_bus_data_list[stop_code].bus_number} - {stops_names.get(stop_code, {}).get('name')}".encode('utf-8'),
+                                    "Priority": "high",
+                                    "Click": f"https://telematics.oasa.gr/content.php#stationInfo_{stop_code}",
+                                    "Markdown": "yes",
+                                    "Tags": "warning,bus",
+                                    "Actions": f"http, Mute, https://ntfy.sh/{TOPIC}, body=Mute 10m, headers.X-Priority=1, clear=true; http, Mute route, https://ntfy.sh/{TOPIC}, body=mute {current_bus_data_list[stop_code].route_number}_{current_bus_data_list[stop_code].vehicle_number}, headers.X-Priority=1, clear=true; http, Stop, https://ntfy.sh/{TOPIC}, body=mute, headers.X-Priority=1, clear=true;"
+                                },timeout=TIMEOUT)
+                print(f"Notification sent for route {current_bus_data_list[stop_code].route_number} with vehicle {current_bus_data_list[stop_code].vehicle_number} at stop {stops_names.get(stop_code, {}).get('name')}.")
+            else:
+                requests.post(f"https://ntfy.sh/{TOPIC}",
+                                data= "Couldn't load data for this stop".encode('utf-8'),
+                                headers={
+                                    "Title": f"No Data - {stops_names.get(stop_code, {}).get('name')}".encode('utf-8'),
+                                    "Priority": "high",
+                                    "Click": f"https://telematics.oasa.gr/content.php#stationInfo_{stop_code}",
+                                    "Markdown": "yes",
+                                    "Tags": "warning,bus",
+                                    "Actions": f"http, Mute, https://ntfy.sh/{TOPIC}, body=Mute 10m, headers.X-Priority=1, clear=true; http, Stop, https://ntfy.sh/{TOPIC}, body=mute, headers.X-Priority=1, clear=true;"
+                                },timeout=TIMEOUT)
+                print(f"Fail notification sent for stop {stops_names.get(stop_code, {}).get('name')}.")
     except requests.RequestException as e:
         print(f"Error sending notification for route {current_bus_data_list[stop_code].route_number}: {e}")
 
@@ -496,14 +509,17 @@ if __name__ == "__main__":
                         print("First call returned no data. Sending empty message")
                         empty_messages[stop_code] = True
                     else:
-                        print(f"No bus data available for stop {stops_names.get(stop_code, {}).get('name')}. Skipping notification.")
                         empty_messages[stop_code] = False
-                        continue
+                        if success:
+                            print(f"No bus data available for stop {stops_names.get(stop_code, {}).get('name')}. Skipping notification.")
+                            continue
+                        else:
+                            print(f"Failed to fetch bus data for stop {stops_names.get(stop_code, {}).get('name')}. Sending fail notification.")
                 else:
                     if empty_messages[stop_code]:
                         empty_messages[stop_code] = False
                 buildMuteList(bus)
-                if checkSendNotification(bus,bus_data_list,second_arrival_data,arrivals,stop_code,empty_messages[stop_code]):
+                if checkSendNotification(bus,bus_data_list,second_arrival_data,arrivals,stop_code,empty_messages[stop_code],success):
                     sendNotification(bus_data_list,stop_code,empty_messages[stop_code],success)
 
             time.sleep(60) # Wait 1 minute before checking again
