@@ -172,10 +172,10 @@ def buildMuteList(bus: BusData):
                 inner[bus.vehicle_number] = False
 
 def checkSendNotification(bus: BusData, current_bus_data_list: dict, second_arrival_data: dict, arrivals: list, stop_code: str,empty_message: bool, success_message: bool):
+    if routes_muted.get(bus.route_number, {}).get(bus.vehicle_number, False):
+        print(f"Vehicle {bus.vehicle_number} on route {bus.route_number} is muted. Skipping notification.")
+        return False
     if success_message and not empty_message :
-        if routes_muted.get(bus.route_number, {}).get(bus.vehicle_number, False):
-            print(f"Vehicle {bus.vehicle_number} on route {bus.route_number} is muted. Skipping notification.")
-            return False
         old_time = int(current_bus_data_list[stop_code].arrival_time)
         new_time = int(bus.arrival_time)
 
