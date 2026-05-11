@@ -23,7 +23,7 @@ HOLIDAYS_CALENDAR_ID = os.getenv("HOLIDAYS_CALENDAR_ID")
 USERS_SETTINGS = os.getenv("usersettings_file_path")
 STOP_NAMES = os.getenv("stopsnames_file_path")
 ROUTE_NAMES = os.getenv("routenames_file_path")
-TIMEOUT = (15, 15)  # (connect timeout, read timeout) in seconds
+TIMEOUT = (60, 15)  # (connect timeout, read timeout) in seconds
 
 # Google Calendar read-only scope
 SCOPES = [os.getenv("GOOGLE_CALENDAR_SCOPE")]
@@ -522,7 +522,7 @@ if __name__ == "__main__":
                 if checkSendNotification(bus,bus_data_list,second_arrival_data,arrivals,stop_code,empty_messages[stop_code],success):
                     sendNotification(bus_data_list,stop_code,empty_messages[stop_code],success)
 
-            time.sleep(60) # Wait 1 minute before checking again
+            time.sleep(150) # Wait 2.5 minutes before checking again
         checkandSaveStopNames()
         checkandSaveRouteNames()
     finally:
