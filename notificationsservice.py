@@ -119,7 +119,7 @@ def createBus(route_names,arrivals):
         bus_data.bus_number = tracked_routes_codes[str(bus["route_code"])]
         bus_data.route_number = str(bus["route_code"])
         bus_data.arrival_time = bus["btime2"]
-        bus_data.vehicle_number = bus["veh_code"]
+        bus_data.vehicle_number = int(bus["veh_code"])
         if route_names.get(str(bus["route_code"]), {}).get("name") is not None and datetime.strptime(route_names.get(str(bus["route_code"]), {}).get("last_update"), "%Y-%m-%d").date() + relativedelta(months=1) >= date.today():
             print(f"Route name for route {bus['route_code']} already fetched recently. Using cached value.")
             bus_data.bus_name = route_names[str(bus["route_code"])]["name"]
@@ -522,7 +522,7 @@ if __name__ == "__main__":
                 if checkSendNotification(bus,bus_data_list,second_arrival_data,arrivals,stop_code,empty_messages[stop_code],success):
                     sendNotification(bus_data_list,stop_code,empty_messages[stop_code],success)
 
-            time.sleep(150) # Wait 2.5 minutes before checking again
+            time.sleep(75) # Wait 1.25 minutes before checking again
         checkandSaveStopNames()
         checkandSaveRouteNames()
     finally:
