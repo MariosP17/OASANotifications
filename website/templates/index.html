@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Service Manager</title>
+  <!-- Pico CSS (Lightweight styling) & htmx -->
+  <link rel="icon" type="image/x-icon" href="/static/image.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+<body class="container" style="padding-top: 2rem;">
+  <h2>Service Control Panel</h2>
+
+  <!-- Status & Controls -->
+  <article>
+    <header>
+      Status: 
+      <span id="status-badge" hx-get="/service/status" hx-trigger="load,every 5s" hx-swap="innerHTML">
+        {{ status }}
+      </span>
+    </header>
+    <div role="group">
+      <button hx-post="/service/start" hx-target="#status-badge">Start</button>
+      <button hx-post="/service/stop" hx-target="#status-badge" class="secondary">Stop</button>
+      <button hx-post="/service/restart" hx-target="#status-badge" class="contrast">Restart</button>
+    </div>
+  </article>
+
+  <!-- Logs -->
+  <article>
+    <header>
+      Recent Logs
+      <button hx-get="/service/logs" hx-target="#log-box" style="float: right; padding: 0.2rem 0.6rem;">Refresh Logs</button>
+    </header>
+    <div id="log-box" hx-get="/service/logs" hx-trigger="load, every 10s" style="max-height: 250px; overflow-y: auto;">
+      Loading logs...
+    </div>
+  </article>
+
+  <!-- Settings -->
+  <article>
+    <header>Configuration</header>
+    <div  style="display: flex; flex-direction: row; gap: 1rem;">
+      <div style="flex: 1;">
+      <form id="settings-form" hx-post="/settings/save" hx-target="#save-status">
+        <h3>Notification times</h3>
+        <div style="max-height: 500px;overflow-y: auto; margin-bottom: 1rem;">
+          <div id="times-list">
+            {% for time in settings.get('times', []) %}
+            <fieldset class="time-row">
+              <label>
+                Start time
+                <input type="time" name="start_time" value="{{ time.get('start_time', '') }}" required>
+              </label>
+              <label>
+                End time
+                <input type="time" name="end_time" value="{{ time.get('end_time', '') }}" required>
+              </label>
+              <label>
+                Timezone
+                <input type="text" name="timezone" value="{{ time.get('timezone', '') }}" required>
+              </label>
+              <label>
+                Stop codes
+                <input type="text" name="codes" value="{{ time.get('codes', []) | join(', ') }}" placeholder="240071, 320005" required>
+              </label>
+              <button type="button" class="secondary delete-time">Delete time window</button>
+            </fieldset>
+            {% endfor %}
+          </div>
+        </div>
+        <button type="button" class="outline" id="add-time">Add time window</button>
+      </form>
+    </div>
+    <div style="flex: 1;">
+      <form id="settings-form-2" hx-post="/settings/save" hx-target="#save-status">
+        <h3>Tracked routes</h3>
+        <div style="max-height: 500px;overflow-y: auto; margin-bottom: 1rem;">
+          <div id="routes-list">
+            {% for route_code, route_name in settings.get('tracked_routes_codes', {}).items() %}
+            <fieldset class="route-row">
+              <label>
+                Route code
+                <input type="text" name="route_code" value="{{ route_code }}" required>
+              </label>
+              <label>
+                Route number
+                <input type="text" name="route_name" value="{{ route_name }}" required>
+              </label>
+              <button type="button" class="secondary delete-route">Delete route</button>
+            </fieldset>
+            {% endfor %}
+          </div>
+        </div>
+        <button type="button" class="outline" id="add-route">Add tracked route</button>
+      </form>
+    </div>
+  </div>
+  <input type="hidden" name="raw_json" id="raw-json">
+  <button type="submit">Save Settings</button>
+  <span id="save-status" style="margin-left: 1rem;"></span>
+</article>
+
+  <script>
+    const timesList = document.getElementById("times-list");
+    const routesList = document.getElementById("routes-list");
+    const settingsForm = document.getElementById("settings-form");
+    const saveStatus = document.getElementById("save-status");
+    let saveMessageTimeout;
+
+    function timeRow() {
+      return `
+        <fieldset class="time-row">
+          <label>Start time <input type="time" name="start_time" required></label>
+          <label>End time <input type="time" name="end_time" required></label>
+          <label>Timezone <input type="text" name="timezone" value="Europe/Athens" required></label>
+          <label>Stop codes <input type="text" name="codes" placeholder="240071, 320005" required></label>
+          <button type="button" class="secondary delete-time">Delete time window</button>
+        </fieldset>`;
+    }
+
+    function routeRow() {
+      return `
+        <fieldset class="route-row">
+          <label>Route code <input type="text" name="route_code" required></label>
+          <label>Route number <input type="text" name="route_name" required></label>
+          <button type="button" class="secondary delete-route">Delete route</button>
+        </fieldset>`;
+    }
+
+    document.getElementById("add-time").addEventListener("click", () => {
+      timesList.insertAdjacentHTML("beforeend", timeRow());
+      timesList.scrollIntoView({ behavior: "smooth", block: "end" });
+    });
+
+    document.getElementById("add-route").addEventListener("click", () => {
+      routesList.insertAdjacentHTML("beforeend", routeRow());
+      routesList.scrollIntoView({ behavior: "smooth", block: "end" });
+    });
+
+    document.addEventListener("click", (event) => {
+      if (event.target.classList.contains("delete-time")) {
+        event.target.closest(".time-row").remove();
+      }
+      if (event.target.classList.contains("delete-route")) {
+        event.target.closest(".route-row").remove();
+      }
+    });
+
+    settingsForm.addEventListener("submit", () => {
+      const times = [...timesList.querySelectorAll(".time-row")].map((row) => ({
+        start_time: row.querySelector('[name="start_time"]').value,
+        end_time: row.querySelector('[name="end_time"]').value,
+        timezone: row.querySelector('[name="timezone"]').value,
+        codes: row.querySelector('[name="codes"]').value
+          .split(",")
+          .map((code) => code.trim())
+          .filter(Boolean)
+      }));
+      const trackedRoutesCodes = {};
+      routesList.querySelectorAll(".route-row").forEach((row) => {
+        const routeCode = row.querySelector('[name="route_code"]').value.trim();
+        const routeName = row.querySelector('[name="route_name"]').value.trim();
+        if (routeCode) {
+          trackedRoutesCodes[routeCode] = routeName;
+        }
+      });
+      document.getElementById("raw-json").value = JSON.stringify({
+        times,
+        tracked_routes_codes: trackedRoutesCodes
+      });
+    });
+
+    settingsForm.addEventListener("htmx:afterSettle", (event) => {
+      if (saveStatus.textContent.trim() !== "Saved successfully!") {
+        return;
+      }
+
+      clearTimeout(saveMessageTimeout);
+      saveMessageTimeout = setTimeout(() => {
+        saveStatus.textContent = "";
+      }, 3000);
+    });
+  </script>
+</body>
+</html>
