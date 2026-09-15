@@ -188,9 +188,9 @@ def checkSendNotification(bus: BusData, current_bus_data_list: dict, second_arri
         if current_bus_data_list[stop_code].arrival_time != "-1" and 0 < (old_time - new_time) < 5 and new_time > 4:
             print(f"Arrival time hasn't changed significantly ({old_time} -> {new_time}). Skipping notification for route {bus.route_number} on stop {stops_names.get(stop_code,{}).get('name')}.")
             return False
-        if (len(arrivals) > 1 and any(str(arrival.get("route_code")) == bus.route_number and arrival.get("veh_code") != bus.vehicle_number for arrival in arrivals) and int(bus.arrival_time) <= 4):
+        if (len(arrivals) > 1 and any(str(arrival.get("route_code")) == bus.route_number and arrival.get("veh_code") != str(bus.vehicle_number) for arrival in arrivals) and int(bus.arrival_time) <= 4):
             print(f"First bus is too close. Adding second bus notification data.")
-            chosen_arrival = [arrival for arrival in arrivals if str(arrival.get("route_code")) == bus.route_number and arrival.get("veh_code") != bus.vehicle_number][0]
+            chosen_arrival = [arrival for arrival in arrivals if str(arrival.get("route_code")) == bus.route_number and arrival.get("veh_code") != str(bus.vehicle_number)][0]
             second_arrival_data[stop_code] = f"\nNext in **{chosen_arrival['btime2']}\'**" if int(chosen_arrival['btime2']) > 0 else "\nNext arriving **now**!"
         current_bus_data_list[stop_code] = bus
     return True
@@ -354,15 +354,22 @@ def is_remote_or_holiday_today():
         now = datetime.now().astimezone()
         start = datetime(now.year, now.month, now.day, tzinfo=ZoneInfo("Europe/Athens")).isoformat()
         end = datetime(now.year, now.month, now.day, hour=23, minute=59, second=59, tzinfo=ZoneInfo("Europe/Athens")).isoformat()
-
-        events_result = service.events().list(
-            calendarId=WORK_CALENDAR_ID, timeMin=start, timeMax=end,
-            singleEvents=True, orderBy='startTime'
-        ).execute()
-        holidays_result = service.events().list(
-            calendarId=HOLIDAYS_CALENDAR_ID, timeMin=start, timeMax=end,
-            singleEvents=True, orderBy='startTime'
-        ).execute()
+        events_result = {'items': []}
+        holidays_result = {'items': []}
+        try:
+            events_result = service.events().list(
+                calendarId=WORK_CALENDAR_ID, timeMin=start, timeMax=end,
+                singleEvents=True, orderBy='startTime'
+            ).execute()
+        except Exception as exc:
+            print(f"Error fetching calendar events for Work Calendar: {exc}")
+        try:
+            holidays_result = service.events().list(
+                calendarId=HOLIDAYS_CALENDAR_ID, timeMin=start, timeMax=end,
+                singleEvents=True, orderBy='startTime'
+            ).execute()
+        except Exception as exc:
+            print(f"Error fetching calendar events for Holidays Calendar: {exc}")
         items = events_result.get('items', []) + holidays_result.get('items', [])
         for ev in items:
             summary = ev.get('summary', '')
