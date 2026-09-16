@@ -86,13 +86,14 @@ class UserSettingsTime:
     def createUserSettingsTimeList(user_settings_list_dict):
         user_settings_list = []
         for item in user_settings_list_dict:
-            user_settings = UserSettingsTime(
-                stop_codes=item.get("codes", []),
-                start=item.get("start_time", "00:00"),
-                timezone=item.get("timezone","Europe/Athens"),
-                end=item.get("end_time", "23:59")
-            )
-            user_settings_list.append(user_settings)
+            if item.get("active", False):
+                user_settings = UserSettingsTime(
+                    stop_codes=item.get("codes", []),
+                    start=item.get("start_time", "00:00"),
+                    timezone=item.get("timezone","Europe/Athens"),
+                    end=item.get("end_time", "23:59")
+                )
+                user_settings_list.append(user_settings)
         return user_settings_list
     @staticmethod
     def getUTCTimeString(local_time, timezone, now):

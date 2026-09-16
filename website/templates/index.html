@@ -2,15 +2,53 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Service Manager</title>
   <!-- Pico CSS (Lightweight styling) & htmx -->
   <link rel="icon" type="image/x-icon" href="/static/image.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    html {
+      font-size: 15px;
+    }
+
+    body.container {
+      max-width: 1280px;
+      padding: 1.25rem clamp(1rem, 3vw, 2.5rem) 2rem !important;
+    }
+
+    .settings-columns {
+      display: flex;
+      flex-direction: row;
+      gap: 1rem;
+    }
+
+    .settings-column {
+      flex: 1;
+      min-width: 0;
+    }
+
+    @media (max-width: 700px) {
+      html {
+        font-size: 16px;
+      }
+
+      body.container {
+        padding: 0.75rem 0.75rem 1.5rem !important;
+      }
+
+      .settings-columns {
+        flex-direction: column;
+      }
+
+      fieldset > div {
+        flex-wrap: wrap;
+      }
+    }
+  </style>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 </head>
 <body class="container" style="padding-top: 2rem;">
-  <h2>Service Control Panel</h2>
-
   <!-- Status & Controls -->
   <article>
     <header>
@@ -40,66 +78,70 @@
   <!-- Settings -->
   <article>
     <header>Configuration</header>
-    <div  style="display: flex; flex-direction: row; gap: 1rem;">
-      <div style="flex: 1;">
-      <form id="settings-form" hx-post="/settings/save" hx-target="#save-status">
+    <form id="settings-form" hx-post="/settings/save" hx-target="#save-status">
+    <div class="settings-columns">
+      <div class="settings-column">
         <h3>Notification times</h3>
         <div style="max-height: 500px;overflow-y: auto; margin-bottom: 1rem;">
-          <div id="times-list">
-            {% for time in settings.get('times', []) %}
-            <fieldset class="time-row">
-              <label>
-                Start time
-                <input type="time" name="start_time" value="{{ time.get('start_time', '') }}" required>
-              </label>
-              <label>
-                End time
-                <input type="time" name="end_time" value="{{ time.get('end_time', '') }}" required>
-              </label>
-              <label>
-                Timezone
-                <input type="text" name="timezone" value="{{ time.get('timezone', '') }}" required>
-              </label>
-              <label>
-                Stop codes
-                <input type="text" name="codes" value="{{ time.get('codes', []) | join(', ') }}" placeholder="240071, 320005" required>
-              </label>
-              <button type="button" class="secondary delete-time">Delete time window</button>
-            </fieldset>
-            {% endfor %}
-          </div>
+          <div id="times-list"></div>
         </div>
         <button type="button" class="outline" id="add-time">Add time window</button>
-      </form>
     </div>
-    <div style="flex: 1;">
-      <form id="settings-form-2" hx-post="/settings/save" hx-target="#save-status">
+    <div class="settings-column">
         <h3>Tracked routes</h3>
         <div style="max-height: 500px;overflow-y: auto; margin-bottom: 1rem;">
-          <div id="routes-list">
-            {% for route_code, route_name in settings.get('tracked_routes_codes', {}).items() %}
-            <fieldset class="route-row">
-              <label>
-                Route code
-                <input type="text" name="route_code" value="{{ route_code }}" required>
-              </label>
-              <label>
-                Route number
-                <input type="text" name="route_name" value="{{ route_name }}" required>
-              </label>
-              <button type="button" class="secondary delete-route">Delete route</button>
-            </fieldset>
-            {% endfor %}
-          </div>
+          <div id="routes-list"></div>
         </div>
         <button type="button" class="outline" id="add-route">Add tracked route</button>
-      </form>
+      </div>
     </div>
-  </div>
-  <input type="hidden" name="raw_json" id="raw-json">
-  <button type="submit">Save Settings</button>
-  <span id="save-status" style="margin-left: 1rem;"></span>
+    <input type="hidden" name="raw_json" id="raw-json">
+    <button type="submit">Save Settings</button>
+    <span id="save-status" style="margin-left: 1rem;"></span>
+  </form>
 </article>
+
+  <!-- Edit dialogs -->
+  <dialog id="time-dialog">
+    <article>
+      <header>Time window</header>
+      <label>Start time <input type="time" id="dialog-start-time" required></label>
+      <label>End time <input type="time" id="dialog-end-time" required></label>
+      <label>Timezone <input type="text" id="dialog-timezone" required></label>
+      <label>Stop codes <input type="text" id="dialog-codes" placeholder="240071, 320005" required></label>
+      <label>
+        <input type="checkbox" id="dialog-active">
+        Active
+      </label>
+      <footer>
+        <button type="button" class="secondary" id="time-dialog-cancel">Cancel</button>
+        <button type="button" id="time-dialog-save">Save</button>
+      </footer>
+    </article>
+  </dialog>
+
+  <dialog id="route-dialog">
+    <article>
+      <header>Tracked route</header>
+      <label>Route code <input type="text" id="dialog-route-code" required></label>
+      <label>Route number <input type="text" id="dialog-route-name" required></label>
+      <footer>
+        <button type="button" class="secondary" id="route-dialog-cancel">Cancel</button>
+        <button type="button" id="route-dialog-save">Save</button>
+      </footer>
+    </article>
+  </dialog>
+
+  <dialog id="confirm-dialog">
+    <article>
+      <header>Confirm</header>
+      <p id="confirm-dialog-message"></p>
+      <footer>
+        <button type="button" class="secondary" id="confirm-dialog-cancel">Cancel</button>
+        <button type="button" class="contrast" id="confirm-dialog-ok">Delete</button>
+      </footer>
+    </article>
+  </dialog>
 
   <script>
     const timesList = document.getElementById("times-list");
@@ -108,61 +150,197 @@
     const saveStatus = document.getElementById("save-status");
     let saveMessageTimeout;
 
-    function timeRow() {
-      return `
-        <fieldset class="time-row">
-          <label>Start time <input type="time" name="start_time" required></label>
-          <label>End time <input type="time" name="end_time" required></label>
-          <label>Timezone <input type="text" name="timezone" value="Europe/Athens" required></label>
-          <label>Stop codes <input type="text" name="codes" placeholder="240071, 320005" required></label>
-          <button type="button" class="secondary delete-time">Delete time window</button>
-        </fieldset>`;
+    let times = {{ settings.get('times', []) | tojson }};
+    let routes = Object.entries({{ settings.get('tracked_routes_codes', {}) | tojson }})
+      .map(([code, name]) => ({ code, name }));
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
     }
 
-    function routeRow() {
+    function timeViewRow(time, index) {
+      const activeLabel = time.active
+        ? '<span style="color: green; font-weight: bold;">Active</span>'
+        : '<span style="color: red; font-weight: bold;">Inactive</span>';
       return `
-        <fieldset class="route-row">
-          <label>Route code <input type="text" name="route_code" required></label>
-          <label>Route number <input type="text" name="route_name" required></label>
-          <button type="button" class="secondary delete-route">Delete route</button>
-        </fieldset>`;
+        <fieldset class="time-row" data-index="${index}">
+          <div style="display:flex; align-items:center; justify-content: space-between; gap: 0.5rem;">
+            <span>${activeLabel} &mdash; ${escapeHtml(time.start_time)} - ${escapeHtml(time.end_time)} (${escapeHtml(time.timezone)})<br>Stop codes: ${escapeHtml((time.codes || []).join(", "))}</span>
+            <span style="white-space: nowrap;">
+              <button type="button" class="outline edit-time">Edit</button>
+              <button type="button" class="secondary delete-time">Delete</button>
+            </span>
+          </div>
+        </fieldset>
+        <hr>`;
     }
 
-    document.getElementById("add-time").addEventListener("click", () => {
-      timesList.insertAdjacentHTML("beforeend", timeRow());
-      timesList.scrollIntoView({ behavior: "smooth", block: "end" });
+    function routeViewRow(route, index) {
+      return `
+        <fieldset class="route-row" data-index="${index}">
+          <div style="display:flex; align-items:center; justify-content: space-between; gap: 0.5rem;">
+            <span>${escapeHtml(route.code)} - ${escapeHtml(route.name)}</span>
+            <span style="white-space: nowrap;">
+              <button type="button" class="outline edit-route">Edit</button>
+              <button type="button" class="secondary delete-route">Delete</button>
+            </span>
+          </div>
+        </fieldset>
+        <hr>`;
+    }
+
+    function renderTimes() {
+      timesList.innerHTML = times.map(timeViewRow).join("");
+    }
+
+    function renderRoutes() {
+      routesList.innerHTML = routes.map(routeViewRow).join("");
+    }
+
+    // --- Confirm dialog ---
+    const confirmDialog = document.getElementById("confirm-dialog");
+    const confirmDialogMessage = document.getElementById("confirm-dialog-message");
+    const confirmDialogOk = document.getElementById("confirm-dialog-ok");
+    const confirmDialogCancel = document.getElementById("confirm-dialog-cancel");
+    let confirmDialogAction = null;
+
+    function askConfirm(message, onConfirm) {
+      confirmDialogMessage.textContent = message;
+      confirmDialogAction = onConfirm;
+      confirmDialog.showModal();
+    }
+
+    confirmDialogOk.addEventListener("click", () => {
+      const action = confirmDialogAction;
+      confirmDialog.close();
+      confirmDialogAction = null;
+      if (action) action();
     });
 
-    document.getElementById("add-route").addEventListener("click", () => {
-      routesList.insertAdjacentHTML("beforeend", routeRow());
-      routesList.scrollIntoView({ behavior: "smooth", block: "end" });
+    confirmDialogCancel.addEventListener("click", () => {
+      confirmDialogAction = null;
+      confirmDialog.close();
     });
 
-    document.addEventListener("click", (event) => {
-      if (event.target.classList.contains("delete-time")) {
-        event.target.closest(".time-row").remove();
+    // --- Time dialog ---
+    const timeDialog = document.getElementById("time-dialog");
+    const dialogStartTime = document.getElementById("dialog-start-time");
+    const dialogEndTime = document.getElementById("dialog-end-time");
+    const dialogTimezone = document.getElementById("dialog-timezone");
+    const dialogCodes = document.getElementById("dialog-codes");
+    const dialogActive = document.getElementById("dialog-active");
+    let editingTimeIndex = null;
+
+    function openTimeDialog(index) {
+      editingTimeIndex = index;
+      const time = index === null ? { start_time: "", end_time: "", timezone: "Europe/Athens", codes: [], active: true } : times[index];
+      dialogStartTime.value = time.start_time || "";
+      dialogEndTime.value = time.end_time || "";
+      dialogTimezone.value = time.timezone || "Europe/Athens";
+      dialogCodes.value = (time.codes || []).join(", ");
+      dialogActive.checked = time.active !== false;
+      timeDialog.showModal();
+    }
+
+    document.getElementById("add-time").addEventListener("click", () => openTimeDialog(null));
+
+    document.getElementById("time-dialog-cancel").addEventListener("click", () => timeDialog.close());
+
+    document.getElementById("time-dialog-save").addEventListener("click", () => {
+      if (!dialogStartTime.reportValidity() || !dialogEndTime.reportValidity() ||
+          !dialogTimezone.reportValidity() || !dialogCodes.reportValidity()) {
+        return;
       }
+      const newTime = {
+        start_time: dialogStartTime.value,
+        end_time: dialogEndTime.value,
+        timezone: dialogTimezone.value,
+        codes: dialogCodes.value.split(",").map((code) => code.trim()).filter(Boolean),
+        active: dialogActive.checked
+      };
+      if (editingTimeIndex === null) {
+        times.push(newTime);
+      } else {
+        times[editingTimeIndex] = newTime;
+      }
+      timeDialog.close();
+      renderTimes();
+    });
+
+    timesList.addEventListener("click", (event) => {
+      const row = event.target.closest(".time-row");
+      if (!row) return;
+      const index = Number(row.dataset.index);
+
+      if (event.target.classList.contains("delete-time")) {
+        askConfirm("Delete this time window?", () => {
+          times.splice(index, 1);
+          renderTimes();
+        });
+      } else if (event.target.classList.contains("edit-time")) {
+        openTimeDialog(index);
+      }
+    });
+
+    // --- Route dialog ---
+    const routeDialog = document.getElementById("route-dialog");
+    const dialogRouteCode = document.getElementById("dialog-route-code");
+    const dialogRouteName = document.getElementById("dialog-route-name");
+    let editingRouteIndex = null;
+
+    function openRouteDialog(index) {
+      editingRouteIndex = index;
+      const route = index === null ? { code: "", name: "" } : routes[index];
+      dialogRouteCode.value = route.code || "";
+      dialogRouteName.value = route.name || "";
+      routeDialog.showModal();
+    }
+
+    document.getElementById("add-route").addEventListener("click", () => openRouteDialog(null));
+
+    document.getElementById("route-dialog-cancel").addEventListener("click", () => routeDialog.close());
+
+    document.getElementById("route-dialog-save").addEventListener("click", () => {
+      if (!dialogRouteCode.reportValidity() || !dialogRouteName.reportValidity()) {
+        return;
+      }
+      const newRoute = {
+        code: dialogRouteCode.value.trim(),
+        name: dialogRouteName.value.trim()
+      };
+      if (editingRouteIndex === null) {
+        routes.push(newRoute);
+      } else {
+        routes[editingRouteIndex] = newRoute;
+      }
+      routeDialog.close();
+      renderRoutes();
+    });
+
+    routesList.addEventListener("click", (event) => {
+      const row = event.target.closest(".route-row");
+      if (!row) return;
+      const index = Number(row.dataset.index);
+
       if (event.target.classList.contains("delete-route")) {
-        event.target.closest(".route-row").remove();
+        askConfirm("Delete this tracked route?", () => {
+          routes.splice(index, 1);
+          renderRoutes();
+        });
+      } else if (event.target.classList.contains("edit-route")) {
+        openRouteDialog(index);
       }
     });
 
     settingsForm.addEventListener("submit", () => {
-      const times = [...timesList.querySelectorAll(".time-row")].map((row) => ({
-        start_time: row.querySelector('[name="start_time"]').value,
-        end_time: row.querySelector('[name="end_time"]').value,
-        timezone: row.querySelector('[name="timezone"]').value,
-        codes: row.querySelector('[name="codes"]').value
-          .split(",")
-          .map((code) => code.trim())
-          .filter(Boolean)
-      }));
       const trackedRoutesCodes = {};
-      routesList.querySelectorAll(".route-row").forEach((row) => {
-        const routeCode = row.querySelector('[name="route_code"]').value.trim();
-        const routeName = row.querySelector('[name="route_name"]').value.trim();
-        if (routeCode) {
-          trackedRoutesCodes[routeCode] = routeName;
+      routes.forEach(({ code, name }) => {
+        if (code) {
+          trackedRoutesCodes[code] = name;
         }
       });
       document.getElementById("raw-json").value = JSON.stringify({
@@ -181,6 +359,10 @@
         saveStatus.textContent = "";
       }, 3000);
     });
+
+    renderTimes();
+    renderRoutes();
   </script>
+
 </body>
 </html>
