@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -19,6 +19,15 @@ templates = Jinja2Templates(directory="templates")
 
 SERVICE_NAME = "oasa-notifications.service"
 CONFIG_FILE = Path("../user_settings.json")
+day_map = {
+        "SUNDAY": 0,
+        "MONDAY": 1,
+        "TUESDAY": 2,
+        "WEDNESDAY": 3,
+        "THURSDAY": 4,
+        "FRIDAY": 5,
+        "SATURDAY": 6
+    }
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -93,11 +102,17 @@ def save_settings(raw_json: str = Form(...)):
         return f'<span style="color: red;">Invalid JSON: {e}</span>'
 
 def checkUidsAndGenerate(times):
+    neededGeneration = False
     if not times or len(times) == 0:
         return
+    print("Checking and generating UUIDs for time entries...")
     for time in times:
         if not time.get("id"):
+            print(f"No ID found for time entry: {time}. Generating a new UUID.")
             time["id"] = str(uuid4())
+            neededGeneration = True
+    if not neededGeneration:
+        print("No new UUIDs were needed for the time entries.")
 
 def editCron(times):
     if not times or len(times) == 0:
@@ -113,7 +128,7 @@ def editCron(times):
                             int(time.get("start_time").split(":")[1]),
                             time.get("timezone", "Europe/Athens")
                         )
-                        job.setall(minute, hour , "*", "*", "1-5")
+                        job.setall(minute, hour , "*", "*", convert_days_to_cron_format(time.get("active_days", [])))
                         job.set_command("sudo systemctl start oasa-notifications.service")
                         job.enable(True)
                     elif len(list(cron.find_comment(time.get("id")+"-start"))) == 0:
@@ -123,7 +138,7 @@ def editCron(times):
                             int(time.get("start_time").split(":")[1]),
                             time.get("timezone", "Europe/Athens")
                         )
-                        job.setall(minute, hour , "*", "*", "1-5")
+                        job.setall(minute, hour , "*", "*", convert_days_to_cron_format(time.get("active_days", [])))
                         job.enable(True)
                 if time.get("end_time"):
                     if len(list(cron.find_comment(time.get("id")+"-stop"))) == 1:
@@ -133,7 +148,7 @@ def editCron(times):
                             int(time.get("end_time").split(":")[1]),
                             time.get("timezone", "Europe/Athens")
                         )
-                        job.setall(minute, hour , "*", "*", "1-5")
+                        job.setall(minute, hour , "*", "*", convert_days_to_cron_format(time.get("active_days", [])))
                         job.set_command("sudo systemctl stop oasa-notifications.service")
                         job.enable(True)
                     elif len(list(cron.find_comment(time.get("id")+"-stop"))) == 0:
@@ -143,7 +158,7 @@ def editCron(times):
                             int(time.get("end_time").split(":")[1]),
                             time.get("timezone", "Europe/Athens")
                         )
-                        job.setall(minute, hour , "*", "*", "1-5")
+                        job.setall(minute, hour , "*", "*", convert_days_to_cron_format(time.get("active_days", [])))
                         job.enable(True)
         else:
             if time.get("id"):
@@ -165,6 +180,7 @@ def removeDeletedCronJobs(times):
                 cron.remove(job)
             for job in cron.find_comment(deleted_id+"-stop"):
                 cron.remove(job)
+        print(f"Removed cron jobs for deleted time ID: {deleted_id}")
     cron.write()
 
 def convert_time_to_server_tz(hour, minute, source_tz_name):
@@ -185,3 +201,18 @@ def convert_time_to_server_tz(hour, minute, source_tz_name):
     server_time = source_dt.astimezone().time()
     
     return str(server_time.hour).zfill(2), str(server_time.minute).zfill(2)
+
+def convert_days_to_cron_format(active_days):
+    # Clean inputs, remove duplicates, and map to integers
+    valid_days = {day_map[day.upper().strip()] for day in active_days if day.upper().strip() in day_map}
+    
+    if not valid_days:
+        return "1-5"  # Default to every weekday if list is empty or invalid
+        
+    if len(valid_days) == 7:
+        return "*"  # If all 7 days are selected, use the standard asterisk
+        
+    sorted_days = sorted(list(valid_days))
+    if sorted_days == list(range(min(sorted_days), max(sorted_days)+1)):
+        return f"{min(sorted_days)}-{max(sorted_days)}"
+    return ",".join(str(d) for d in sorted_days)

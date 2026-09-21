@@ -110,7 +110,10 @@
       <label>End time <input type="time" id="dialog-end-time" required></label>
       <label>Timezone <input type="text" id="dialog-timezone" required></label>
       <label>Stop codes <input type="text" id="dialog-codes" placeholder="240071, 320005" required></label>
-      <label>Topic <input type="text" id="dialog-topic"></label>
+      <label>Topic <input type="text" id="dialog-topic" placeholder="oasa-notifications" required></label>
+      <input type="hidden" id="dialog-active-days-value">
+      <div id="dialog-active-days" style="display: flex; gap: 0.2rem; margin-bottom: 1rem;">
+      </div> 
       <label>
         <input type="checkbox" id="dialog-active">
         Active
@@ -145,6 +148,8 @@
     </article>
   </dialog>
 
+  <script id="times-data" type="application/json">{{ settings.get('times', []) | tojson }}</script>
+  <script id="routes-data" type="application/json">{{ settings.get('tracked_routes_codes', {}) | tojson }}</script>
   <script>
     const timesList = document.getElementById("times-list");
     const routesList = document.getElementById("routes-list");
@@ -152,8 +157,8 @@
     const saveStatus = document.getElementById("save-status");
     let saveMessageTimeout;
 
-    let times = {{ settings.get('times', []) | tojson }};
-    let routes = Object.entries({{ settings.get('tracked_routes_codes', {}) | tojson }})
+    let times = JSON.parse(document.getElementById("times-data").textContent);
+    let routes = Object.entries(JSON.parse(document.getElementById("routes-data").textContent))
       .map(([code, name]) => ({ code, name }));
 
     function escapeHtml(value) {
@@ -170,20 +175,43 @@
         : '<span style="color: red; font-weight: bold;">Inactive</span>';
       return `
         <fieldset class="time-row" data-index="${index}">
-          <div style="display:flex; align-items:center; justify-content: space-between; gap: 0.5rem;">
+          <div style="display:flex; flex-direction: column; justify-content: space-between; gap: 0.5rem;">
             <span>
               <span style=""><i>${escapeHtml(time.id || "")}</i></span>
               <br>
               <br>
             ${activeLabel} &mdash; ${escapeHtml(time.start_time)} - ${escapeHtml(time.end_time)} (${escapeHtml(time.timezone)})
               <br>
-              Stop codes: ${escapeHtml((time.codes || []).join(", "))}
+              <span>Stop codes: ${escapeHtml((time.codes || []).join(", "))}</span>
               <br>
-              Topic: ${escapeHtml(time.topic || "")}
+              <span>Topic: ${escapeHtml(time.topic || "")}</span>
+              </span>
+              <span style="display: flex; gap: 0.2rem;">
+                <span style="${escapeHtml(time.active_days || [])?.includes('MONDAY') ? 'background-color: blue;' : 'background-color: #414854;'} padding: 1rem; border-radius: 50%; height: 1.5rem; line-height: 1.5rem; width: 1.5rem; display: inline-flex; justify-content: center;align-items: center; color: white;">
+                  M
+                </span>
+                <span style="${escapeHtml(time.active_days || [])?.includes('TUESDAY') ? 'background-color: blue;' : 'background-color: #414854;'} padding: 1rem; border-radius: 50%; height: 1.5rem; line-height: 1.5rem; width: 1.5rem; display: inline-flex; justify-content: center;align-items: center; color: white;">
+                  T
+                </span>
+                <span style="${escapeHtml(time.active_days || [])?.includes('WEDNESDAY') ? 'background-color: blue;' : 'background-color: #414854;'} padding: 1rem; border-radius: 50%; height: 1.5rem; line-height: 1.5rem; width: 1.5rem; display: inline-flex; justify-content: center;align-items: center; color: white;">
+                  W
+                </span>
+                <span style="${escapeHtml(time.active_days || [])?.includes('THURSDAY') ? 'background-color: blue;' : 'background-color: #414854;'} padding: 1rem; border-radius: 50%; height: 1.5rem; line-height: 1.5rem; width: 1.5rem; display: inline-flex; justify-content: center;align-items: center; color: white;">
+                  T
+                </span>
+                <span style="${escapeHtml(time.active_days || [])?.includes('FRIDAY') ? 'background-color: blue;' : 'background-color: #414854;'} padding: 1rem; border-radius: 50%; height: 1.5rem; line-height: 1.5rem; width: 1.5rem; display: inline-flex; justify-content: center;align-items: center; color: white;">
+                  F
+                </span>
+                <span style="${escapeHtml(time.active_days || [])?.includes('SATURDAY') ? 'background-color: blue;' : 'background-color: #414854;'} padding: 1rem; border-radius: 50%; height: 1.5rem; line-height: 1.5rem; width: 1.5rem; display: inline-flex; justify-content: center;align-items: center; color: white;">
+                  S
+                </span>
+                <span style="${escapeHtml(time.active_days || [])?.includes('SUNDAY') ? 'background-color: blue;' : 'background-color: #414854;'} padding: 1rem; border-radius: 50%; height: 1.5rem; line-height: 1.5rem; width: 1.5rem; display: inline-flex; justify-content: center;align-items: center; color: white;">
+                  S
+                </span>
               </span>
             <span style="white-space: nowrap;">
-              <button type="button" class="outline edit-time">Edit</button>
-              <button type="button" class="secondary delete-time">Delete</button>
+              <button style="margin-bottom: 0 !important;" type="button" class="outline edit-time">Edit</button>
+              <button style="margin-bottom: 0 !important;" type="button" class="secondary delete-time">Delete</button>
             </span>
           </div>
         </fieldset>
@@ -246,17 +274,23 @@
     const dialogCodes = document.getElementById("dialog-codes");
     const dialogActive = document.getElementById("dialog-active");
     const dialogTopic = document.getElementById("dialog-topic");
+    const dialogActiveDays = document.getElementById("dialog-active-days");
+    const dialogActiveDaysValue = document.getElementById("dialog-active-days-value");
     let editingTimeIndex = null;
+
+    const days = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"];
 
     function openTimeDialog(index) {
       editingTimeIndex = index;
-      const time = index === null ? { start_time: "", end_time: "", timezone: "Europe/Athens", codes: [], active: true } : times[index];
+      const time = index === null ? { start_time: "", end_time: "", timezone: "Europe/Athens", codes: [], active: true, topic: "", active_days: [] } : times[index];
       dialogId.value = time.id || "";
       dialogStartTime.value = time.start_time || "";
       dialogEndTime.value = time.end_time || "";
       dialogTimezone.value = time.timezone || "Europe/Athens";
       dialogCodes.value = (time.codes || []).join(", ");
       dialogActive.checked = time.active !== false;
+      dialogActiveDays.innerHTML = days.map(day => `<span onClick="toggleDay('${day}');" style="cursor: pointer; ${time.active_days && time.active_days.includes(day) ? 'background-color: blue;' : 'background-color: #414854;'} padding: 1rem; border-radius: 50%; height: 1.5rem; line-height: 1.5rem; width: 1.5rem; display: inline-flex; justify-content: center;align-items: center; color: white;">${day.charAt(0)}</span>`).join('');
+      dialogActiveDaysValue.value = (time.active_days || []).join(", ");
       dialogTopic.value = time.topic || "";
       timeDialog.showModal();
     }
@@ -277,8 +311,10 @@
         timezone: dialogTimezone.value,
         codes: dialogCodes.value.split(",").map((code) => code.trim()).filter(Boolean),
         active: dialogActive.checked,
+        active_days: dialogActiveDaysValue.value.split(",").map((day) => day.trim()).filter(Boolean),
         topic: dialogTopic.value
       };
+
       if (editingTimeIndex === null) {
         times.push(newTime);
       } else {
@@ -287,6 +323,11 @@
       timeDialog.close();
       renderTimes();
     });
+
+    function toggleDay(day) {
+      dialogActiveDaysValue.value = (dialogActiveDaysValue.value || "").split(', ').includes(day) ? (dialogActiveDaysValue.value || "").split(', ').filter(d => d !== day).join(', ') : ((dialogActiveDaysValue.value || "").split(', ').concat([day])).join(', ');
+      dialogActiveDays.innerHTML = days.map(day => `<span onClick="toggleDay('${day}');" style="cursor: pointer; ${dialogActiveDaysValue.value.split(', ').includes(day) ? 'background-color: blue;' : 'background-color: #414854;'} padding: 1rem; border-radius: 50%; height: 1.5rem; line-height: 1.5rem; width: 1.5rem; display: inline-flex; justify-content: center;align-items: center; color: white;">${day.charAt(0)}</span>`).join('');
+    }
 
     timesList.addEventListener("click", (event) => {
       const row = event.target.closest(".time-row");
