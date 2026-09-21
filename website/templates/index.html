@@ -105,10 +105,12 @@
   <dialog id="time-dialog">
     <article>
       <header>Time window</header>
+      <input type="hidden" id="dialog-id">
       <label>Start time <input type="time" id="dialog-start-time" required></label>
       <label>End time <input type="time" id="dialog-end-time" required></label>
       <label>Timezone <input type="text" id="dialog-timezone" required></label>
       <label>Stop codes <input type="text" id="dialog-codes" placeholder="240071, 320005" required></label>
+      <label>Topic <input type="text" id="dialog-topic"></label>
       <label>
         <input type="checkbox" id="dialog-active">
         Active
@@ -169,7 +171,16 @@
       return `
         <fieldset class="time-row" data-index="${index}">
           <div style="display:flex; align-items:center; justify-content: space-between; gap: 0.5rem;">
-            <span>${activeLabel} &mdash; ${escapeHtml(time.start_time)} - ${escapeHtml(time.end_time)} (${escapeHtml(time.timezone)})<br>Stop codes: ${escapeHtml((time.codes || []).join(", "))}</span>
+            <span>
+              <span style=""><i>${escapeHtml(time.id || "")}</i></span>
+              <br>
+              <br>
+            ${activeLabel} &mdash; ${escapeHtml(time.start_time)} - ${escapeHtml(time.end_time)} (${escapeHtml(time.timezone)})
+              <br>
+              Stop codes: ${escapeHtml((time.codes || []).join(", "))}
+              <br>
+              Topic: ${escapeHtml(time.topic || "")}
+              </span>
             <span style="white-space: nowrap;">
               <button type="button" class="outline edit-time">Edit</button>
               <button type="button" class="secondary delete-time">Delete</button>
@@ -228,21 +239,25 @@
 
     // --- Time dialog ---
     const timeDialog = document.getElementById("time-dialog");
+    const dialogId = document.getElementById("dialog-id");
     const dialogStartTime = document.getElementById("dialog-start-time");
     const dialogEndTime = document.getElementById("dialog-end-time");
     const dialogTimezone = document.getElementById("dialog-timezone");
     const dialogCodes = document.getElementById("dialog-codes");
     const dialogActive = document.getElementById("dialog-active");
+    const dialogTopic = document.getElementById("dialog-topic");
     let editingTimeIndex = null;
 
     function openTimeDialog(index) {
       editingTimeIndex = index;
       const time = index === null ? { start_time: "", end_time: "", timezone: "Europe/Athens", codes: [], active: true } : times[index];
+      dialogId.value = time.id || "";
       dialogStartTime.value = time.start_time || "";
       dialogEndTime.value = time.end_time || "";
       dialogTimezone.value = time.timezone || "Europe/Athens";
       dialogCodes.value = (time.codes || []).join(", ");
       dialogActive.checked = time.active !== false;
+      dialogTopic.value = time.topic || "";
       timeDialog.showModal();
     }
 
@@ -250,17 +265,19 @@
 
     document.getElementById("time-dialog-cancel").addEventListener("click", () => timeDialog.close());
 
-    document.getElementById("time-dialog-save").addEventListener("click", () => {
+    document.getElementById("time-dialog-save").addEventListener("click",async () => {
       if (!dialogStartTime.reportValidity() || !dialogEndTime.reportValidity() ||
           !dialogTimezone.reportValidity() || !dialogCodes.reportValidity()) {
         return;
       }
       const newTime = {
+        id: dialogId.value || await fetch("/UUID").then(res => res.text()),
         start_time: dialogStartTime.value,
         end_time: dialogEndTime.value,
         timezone: dialogTimezone.value,
         codes: dialogCodes.value.split(",").map((code) => code.trim()).filter(Boolean),
-        active: dialogActive.checked
+        active: dialogActive.checked,
+        topic: dialogTopic.value
       };
       if (editingTimeIndex === null) {
         times.push(newTime);
