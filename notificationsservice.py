@@ -498,6 +498,12 @@ if __name__ == "__main__":
         while True:
             if is_muted:
                 print("System is muted. Notification blocked.")
+                requests.post(f"https://ntfy.sh/{MUTE_TOPIC}",
+                    data= "System is muted. Notification blocked.".encode('utf-8'),
+                    headers={
+                        "Priority": "min"
+                    },
+                    timeout=TIMEOUT)
                 break
             if mute_until and datetime.now() < mute_until:
                 print(f"System temporarily muted until {mute_until.strftime('%H:%M:%S')}. Skipping this cycle.")
