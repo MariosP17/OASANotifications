@@ -62,21 +62,21 @@ def index(request: Request):
     )
 
 
-@app.get("/service/status", response_class=HTMLResponse)
+@app.get("/api/service/status", response_class=HTMLResponse)
 def status():
     st = get_service_status()
     color = "green" if st == "active" else "red"
     return f'<span style="color: {color}; font-weight: bold;">{st}</span>'
 
 
-@app.post("/service/{action}", response_class=HTMLResponse)
+@app.post("/api/service/{action}", response_class=HTMLResponse)
 def control_service(action: str):
     if action in ["start", "stop", "restart"]:
         subprocess.run(["sudo", "systemctl", action, SERVICE_NAME], check=True)
     return status()
 
 
-@app.get("/service/logs", response_class=HTMLResponse)
+@app.get("/api/service/logs", response_class=HTMLResponse)
 def logs():
     result = subprocess.run(
         ["journalctl", "-u", SERVICE_NAME, "-n", "30", "--no-pager"],
@@ -85,11 +85,11 @@ def logs():
     )
     return f"<pre><code>{result.stdout}</code></pre>"
 
-@app.get("/UUID", response_class=HTMLResponse)
+@app.get("/api/UUID", response_class=HTMLResponse)
 def generate_uuid():
     return str(uuid4())
 
-@app.post("/settings/save", response_class=HTMLResponse)
+@app.post("/api/settings/save", response_class=HTMLResponse)
 def save_settings(raw_json: str = Form(...)):
     try:
         parsed = json.loads(raw_json)
